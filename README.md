@@ -5,6 +5,7 @@ Rule-based 3h ETHUSDT perpetual trading pipeline with exact Pine Script reproduc
 ## Install
 
 ```bash
+git clone https://github.com/BlackSarkk/Experiment-03_Simple_AlgoTrade.git
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
