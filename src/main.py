@@ -81,6 +81,40 @@ def print_metrics_table(metrics: Dict[str, Any]):
     print("=" * 70 + "\n")
 
 
+def str_to_bool(v):
+    if isinstance(v, bool):
+        return v
+    return str(v).lower() in ("true", "1", "yes", "t", "y")
+
+
+def print_effective_strategy_configuration(cfg: PipelineConfig):
+    print("\n" + "=" * 80)
+    print("                 EFFECTIVE STRATEGY CONFIGURATION")
+    print("=" * 80)
+    print(f"  Symbol                      : {cfg.strategy.symbol}")
+    print(f"  Resolution (Timeframe)      : {cfg.strategy.resolution}")
+    print(f"  EMA Period                  : {cfg.strategy.ema_period}")
+    print(f"  RSI Period                  : {cfg.strategy.rsi_period}")
+    print(f"  RSI Overbought (OB)         : {cfg.strategy.rsi_overbought}")
+    print(f"  RSI Oversold (OS)           : {cfg.strategy.rsi_oversold}")
+    print(f"  ATR Period                  : {cfg.strategy.atr_period}")
+    print(f"  Consolidation Candles       : {cfg.strategy.consolidation_candles}")
+    print(f"  Consolidation ATR Mult      : {cfg.strategy.consolidation_atr_mult}")
+    print(f"  Swing Lookback              : {cfg.strategy.swing_lookback}")
+    print(f"  Volume SMA Period           : {cfg.strategy.volume_sma_period}")
+    print(f"  Volume Multiplier           : {cfg.strategy.volume_mult}")
+    print(f"  Long Enabled                : {cfg.strategy.long_enabled}")
+    print(f"  Short Enabled               : {cfg.strategy.short_enabled}")
+    print(f"  Risk-Reward Ratio           : {cfg.strategy.risk_reward_ratio}")
+    print(f"  Forward Mode                : {cfg.forward_mode}")
+    print(f"  Leverage                    : {cfg.risk.leverage}x")
+    print(f"  Risk Per Trade %            : {cfg.risk.risk_per_trade_pct * 100.0:.2f}%")
+    print(f"  Max Position Allocation %   : {cfg.risk.max_position_allocation_pct * 100.0:.2f}%")
+    print(f"  Commission (Taker Fee)      : {cfg.execution.taker_fee_pct * 100.0:.4f}%")
+    print(f"  Slippage (Ticks)            : {cfg.execution.slippage_ticks}")
+    print("=" * 80 + "\n")
+
+
 def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False):
     if clear_cache_only:
         data_loader = MarketDataLoader(data_dir=cfg.data_dir)
@@ -89,6 +123,7 @@ def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False):
         sys.exit(0)
 
     print_banner()
+    print_effective_strategy_configuration(cfg)
     print_run_configuration_panel(cfg)
 
     # Handle CLEAR_CACHE if requested
@@ -176,6 +211,21 @@ def main():
     parser.add_argument("--resume", action="store_true", default=True, help="Resume existing forward paper state")
     parser.add_argument("--no-resume", action="store_false", dest="resume", help="Do not resume forward paper state")
 
+    # Strategy Parameters Configuration
+    parser.add_argument("--ema-period", type=int, default=51)
+    parser.add_argument("--rsi-period", type=int, default=14)
+    parser.add_argument("--rsi-overbought", type=float, default=65.0)
+    parser.add_argument("--rsi-oversold", type=float, default=35.0)
+    parser.add_argument("--atr-period", type=int, default=14)
+    parser.add_argument("--consolidation-candles", type=int, default=8)
+    parser.add_argument("--consolidation-atr-mult", type=float, default=2.2)
+    parser.add_argument("--swing-lookback", type=int, default=8)
+    parser.add_argument("--volume-sma-period", type=int, default=20)
+    parser.add_argument("--volume-mult", type=float, default=1.0)
+    parser.add_argument("--long-enabled", type=str_to_bool, default=True)
+    parser.add_argument("--short-enabled", type=str_to_bool, default=True)
+    parser.add_argument("--forward-mode", type=str, default="PAPER")
+
     args = parser.parse_args()
 
     cfg = PipelineConfig()
@@ -218,6 +268,20 @@ def main():
     cfg.strategy.symbol = args.symbol
     cfg.strategy.resolution = args.timeframe
     cfg.strategy.risk_reward_ratio = args.rr_ratio
+
+    cfg.strategy.ema_period = args.ema_period
+    cfg.strategy.rsi_period = args.rsi_period
+    cfg.strategy.rsi_overbought = args.rsi_overbought
+    cfg.strategy.rsi_oversold = args.rsi_oversold
+    cfg.strategy.atr_period = args.atr_period
+    cfg.strategy.consolidation_candles = args.consolidation_candles
+    cfg.strategy.consolidation_atr_mult = args.consolidation_atr_mult
+    cfg.strategy.swing_lookback = args.swing_lookback
+    cfg.strategy.volume_sma_period = args.volume_sma_period
+    cfg.strategy.volume_mult = args.volume_mult
+    cfg.strategy.long_enabled = args.long_enabled
+    cfg.strategy.short_enabled = args.short_enabled
+    cfg.forward_mode = args.forward_mode
 
     cfg.risk.initial_capital = args.initial_capital
     cfg.risk.leverage = args.leverage

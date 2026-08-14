@@ -338,7 +338,7 @@ class PaperForwardEngine:
             df_row = pd.DataFrame([snapshot], columns=self.EQUITY_COLUMNS)
             df_row.to_csv(self.equity_path, mode="a", header=False, index=False)
 
-    def evaluate_live_tick(self, current_price: float):
+    def evaluate_live_tick(self, current_price: float, is_open: bool = False):
         """Instant SL/TP monitoring on every live price tick."""
         if self.active_position is None:
             return
@@ -354,25 +354,30 @@ class PaperForwardEngine:
         exit_triggered = False
         exit_reason = None
         exit_price = None
+        slippage = self.config.execution.slippage_ticks * 0.1
 
         if side == "LONG":
             if current_price <= sl:
                 exit_triggered = True
                 exit_reason = "SL"
-                exit_price = min(current_price, sl) - (self.config.execution.slippage_ticks * 0.1)
+                base_exit = current_price if is_open and current_price <= sl else sl
+                exit_price = base_exit - slippage
             elif current_price >= tp:
                 exit_triggered = True
                 exit_reason = "TP"
-                exit_price = max(current_price, tp) - (self.config.execution.slippage_ticks * 0.1)
+                base_exit = current_price if is_open and current_price >= tp else tp
+                exit_price = base_exit - slippage
         elif side == "SHORT":
             if current_price >= sl:
                 exit_triggered = True
                 exit_reason = "SL"
-                exit_price = max(current_price, sl) + (self.config.execution.slippage_ticks * 0.1)
+                base_exit = current_price if is_open and current_price >= sl else sl
+                exit_price = base_exit + slippage
             elif current_price <= tp:
                 exit_triggered = True
                 exit_reason = "TP"
-                exit_price = min(current_price, tp) + (self.config.execution.slippage_ticks * 0.1)
+                base_exit = current_price if is_open and current_price <= tp else tp
+                exit_price = base_exit + slippage
 
         if exit_triggered and exit_price is not None:
             self._close_paper_position(exit_price, exit_reason)
@@ -515,7 +520,7 @@ class PaperForwardEngine:
         sig_ts = sig.datetime_str
         sig_candle_ts = sig.timestamp
 
-        self.log_event("CANDLE_CLOSE", f"3H Candle Closed @ {closed_dt_str} | Close: ${closed_row.get('close'):.2f}")
+        self.log_event("CANDLE_CLOSE", f"{self.config.platform.resolution} Candle Closed @ {closed_dt_str} | Close: ${closed_row.get('close'):.2f}")
 
         exp_start_str = self.experiment_start_utc
         is_fresh_start = not self.config.resume_forward_state or self.config.reset or self.config.reset_forward_state
@@ -526,6 +531,10 @@ class PaperForwardEngine:
             entry_allowed = False
             rejection_reason = "Signal already executed"
 
+        elif sig_candle_ts != closed_ts:
+            entry_allowed = False
+            rejection_reason = "Signal is stale (does not match closed candle timestamp)"
+
         elif sig_candle_ts <= self.last_warmup_candle_ts and source == "WARMUP":
             entry_allowed = False
             rejection_reason = "Signal generated during/before historical warmup (closed before experiment startup)"
@@ -534,7 +543,7 @@ class PaperForwardEngine:
             entry_allowed = False
             rejection_reason = "Fresh start/reset ignores historical warmup signals for entry"
 
-        logger.info(
+        log_msg = (
             f"Diagnostics: experiment_start_time={exp_start_str}, "
             f"last_warmup_candle={self.last_warmup_candle_ts}, "
             f"last_processed_live_candle={closed_ts}, "
@@ -543,6 +552,10 @@ class PaperForwardEngine:
             f"entry_allowed={entry_allowed}, "
             f"rejection_reason={rejection_reason}"
         )
+        if rejection_reason == "Signal already executed":
+            logger.debug(log_msg)
+        else:
+            logger.info(log_msg)
 
         if not entry_allowed:
             return
@@ -572,8 +585,8 @@ class PaperForwardEngine:
                     "entry_price": round(realized_entry, 2),
                     "size": sizing.position_size,
                     "nominal_value": sizing.nominal_position_value,
-                    "sl_price": sizing.sl_price,
-                    "tp_price": sizing.tp_price,
+                    "sl_price": sig.sl_price,
+                    "tp_price": sig.tp_price,
                     "risk_budget": sizing.risk_amount,
                     "entry_fee": round(entry_fee, 2),
                     "duration_bars": 0,

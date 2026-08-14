@@ -16,8 +16,19 @@ RISK_PER_TRADE_PCT=1.5
 MAX_POSITION_ALLOCATION_PCT=50
 RR_RATIO=1.5
 
-LONG_ENABLED=true
-SHORT_ENABLED=true
+LONG_ENABLED=${LONG_ENABLED:-true}
+SHORT_ENABLED=${SHORT_ENABLED:-true}
+
+EMA_PERIOD=${EMA_PERIOD:-51}
+RSI_PERIOD=${RSI_PERIOD:-14}
+RSI_OVERBOUGHT=${RSI_OVERBOUGHT:-65.0}
+RSI_OVERSOLD=${RSI_OVERSOLD:-35.0}
+ATR_PERIOD=${ATR_PERIOD:-14}
+CONSOLIDATION_CANDLES=${CONSOLIDATION_CANDLES:-8}
+CONSOLIDATION_ATR_MULT=${CONSOLIDATION_ATR_MULT:-2.2}
+SWING_LOOKBACK=${SWING_LOOKBACK:-8}
+VOLUME_SMA_PERIOD=${VOLUME_SMA_PERIOD:-20}
+VOLUME_MULT=${VOLUME_MULT:-1.0}
 
 COMMISSION_PCT=0.05
 SLIPPAGE_TICKS=1
@@ -81,7 +92,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Build Python execution string
-CMD=".venv/bin/python3 src/main.py --symbol $SYMBOL --platform $PLATFORM --timeframe $TIMEFRAME --initial-capital $INITIAL_BALANCE --leverage $LEVERAGE --risk-pct $RISK_PER_TRADE_PCT --max-alloc-pct $MAX_POSITION_ALLOCATION_PCT --rr-ratio $RR_RATIO --commission-pct $COMMISSION_PCT --slippage-ticks $SLIPPAGE_TICKS --execution-mode $EXECUTION_MODE"
+CMD=".venv/bin/python3 src/main.py --symbol $SYMBOL --platform $PLATFORM --timeframe $TIMEFRAME --initial-capital $INITIAL_BALANCE --leverage $LEVERAGE --risk-pct $RISK_PER_TRADE_PCT --max-alloc-pct $MAX_POSITION_ALLOCATION_PCT --rr-ratio $RR_RATIO --commission-pct $COMMISSION_PCT --slippage-ticks $SLIPPAGE_TICKS --execution-mode $EXECUTION_MODE --long-enabled $LONG_ENABLED --short-enabled $SHORT_ENABLED --forward-mode $FORWARD_MODE --ema-period $EMA_PERIOD --rsi-period $RSI_PERIOD --rsi-overbought $RSI_OVERBOUGHT --rsi-oversold $RSI_OVERSOLD --atr-period $ATR_PERIOD --consolidation-candles $CONSOLIDATION_CANDLES --consolidation-atr-mult $CONSOLIDATION_ATR_MULT --swing-lookback $SWING_LOOKBACK --volume-sma-period $VOLUME_SMA_PERIOD --volume-mult $VOLUME_MULT"
 
 if [ "$CLEAR_CACHE_ONLY" = true ]; then
   CMD="$CMD --clear-cache-only"
