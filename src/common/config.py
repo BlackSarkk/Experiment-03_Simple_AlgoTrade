@@ -92,8 +92,8 @@ class PipelineConfig:
     reset_forward_state: bool = False       # Stage-specific forward state reset
     resume_forward_state: bool = True       # Default resume enabled when reset=False
 
-    # Raspberry Pi 7-Day Unattended Paper Forward Controls
-    experiment_duration_days: float = 7.0   # 7 Calendar Days
+    # Paper Forward Controls
+    experiment_duration_days: float = 7.0   # Calendar Days
     equity_snapshot_interval_mins: int = 10 # Periodic 10-min equity snapshots
     auto_save_seconds: float = 30.0         # Atomic recovery state auto-save frequency (sec)
 

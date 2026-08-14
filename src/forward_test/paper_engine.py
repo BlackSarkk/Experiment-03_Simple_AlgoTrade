@@ -77,7 +77,9 @@ class PaperForwardEngine:
 
         # Engine internal state
         now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        self.experiment_id = f"EXP_{now_str}_ETH3H"
+        clean_sym = config.platform.symbol.upper().replace(".P", "").replace("-", "")
+        clean_tf = config.platform.resolution
+        self.experiment_id = f"EXP_{now_str}_{clean_sym}_{clean_tf}"
         self.experiment_start_utc = datetime.now(timezone.utc).isoformat()
         self.experiment_end_utc = (datetime.now(timezone.utc) + timedelta(days=config.experiment_duration_days)).isoformat()
         self.process_restart_count = 0
@@ -144,28 +146,76 @@ class PaperForwardEngine:
         df_row.to_csv(self.events_path, mode="a", header=False, index=False)
         logger.info(f"[EVENT] [{event_type}] {details}")
 
-    def log_startup_system_info(self):
-        """Print Raspberry Pi 5 system information and experiment metadata at startup."""
-        arch = platform.machine()
-        py_ver = sys.version.split()[0]
+    def _get_os_info(self) -> str:
+        try:
+            if os.path.exists("/etc/os-release"):
+                with open("/etc/os-release", "r") as f:
+                    info = {}
+                    for line in f:
+                        if "=" in line:
+                            k, v = line.strip().split("=", 1)
+                            info[k] = v.strip('"')
+                    return info.get("PRETTY_NAME", f"{platform.system()} {platform.release()}")
+        except Exception:
+            pass
+        return f"{platform.system()} {platform.release()}"
+
+    def _get_cpu_model(self) -> str:
+        try:
+            if os.path.exists("/proc/cpuinfo"):
+                with open("/proc/cpuinfo", "r") as f:
+                    for line in f:
+                        if "model name" in line:
+                            return line.split(":", 1)[1].strip()
+        except Exception:
+            pass
+        return platform.processor() or platform.machine()
+
+    def _get_ram_info(self) -> str:
         try:
             import psutil
-            ram_gb = psutil.virtual_memory().total / (1024 ** 3)
-            ram_str = f"{ram_gb:.2f} GB"
+            total_gb = psutil.virtual_memory().total / (1024 ** 3)
+            return f"{total_gb:.1f} GB"
         except Exception:
-            ram_str = "8.00 GB (Raspberry Pi 5)"
+            pass
+        try:
+            if os.path.exists("/proc/meminfo"):
+                with open("/proc/meminfo", "r") as f:
+                    for line in f:
+                        if line.startswith("MemTotal:"):
+                            kb = int(line.split()[1])
+                            return f"{kb / (1024 * 1024):.1f} GB"
+        except Exception:
+            pass
+        return "Unknown RAM"
+
+    def log_startup_system_info(self):
+        """Print normalized system information and session metadata at startup."""
+        os_info = self._get_os_info()
+        arch = platform.machine()
+        cpu_model = self._get_cpu_model()
+        threads = os.cpu_count() or 1
+        cores_str = f"{threads} threads"
+        ram_str = self._get_ram_info()
+        py_ver = sys.version.split()[0]
 
         print("\n" + "=" * 80)
-        print("          RASPBERRY PI 5 — OFFICIAL 7-DAY FORWARD EXPERIMENT STARTUP")
+        print("                   FORWARD TEST — STARTUP")
         print("=" * 80)
-        print(f"  CPU Architecture   : {arch}")
-        print(f"  System RAM         : {ram_str}")
-        print(f"  Python Version     : {py_ver}")
-        print(f"  Project Root Path  : {os.path.abspath('.')}")
-        print(f"  Forward State File : {os.path.abspath(self.state_store.state_file)}")
-        print(f"  Experiment ID      : {self.experiment_id}")
-        print(f"  Experiment Start   : {self.experiment_start_utc}")
-        print(f"  Experiment End     : {self.experiment_end_utc}")
+        print(f"  OS                : {os_info}")
+        print(f"  Architecture      : {arch}")
+        print(f"  CPU               : {cpu_model}")
+        print(f"  CPU Cores         : {cores_str}")
+        print(f"  System RAM        : {ram_str}")
+        print(f"  Python            : {py_ver}")
+        print(f"  Project Root      : {os.path.abspath('.')}")
+        print(f"  Symbol            : {self.config.platform.symbol}")
+        print(f"  Timeframe         : {self.config.platform.resolution}")
+        print(f"  Initial Balance   : ${self.config.risk.initial_capital:,.2f}")
+        print(f"  Leverage          : {self.config.risk.leverage}x")
+        print(f"  Mode              : PAPER")
+        print(f"  Experiment ID     : {self.experiment_id}")
+        print(f"  Start Time        : {self.experiment_start_utc}")
         print("=" * 80 + "\n")
 
     def load_or_init_state(self):
@@ -201,7 +251,7 @@ class PaperForwardEngine:
                 except Exception:
                     pass
 
-            self.log_event("PROCESS_RESTART", f"Resumed 7-day experiment '{self.experiment_id}' (Restart #{self.process_restart_count}). Balance=${self.account.balance:.2f}")
+            self.log_event("PROCESS_RESTART", f"Resumed forward experiment '{self.experiment_id}' (Restart #{self.process_restart_count}). Balance=${self.account.balance:.2f}")
         else:
             self.process_restart_count = 0
             self.account = AccountState(
@@ -212,7 +262,7 @@ class PaperForwardEngine:
             self.active_position = None
             self.trades_history = []
             self._init_csv_headers()
-            self.log_event("EXPERIMENT_STARTED", f"Official 7-day experiment '{self.experiment_id}' started at ${self.config.risk.initial_capital:.2f}")
+            self.log_event("EXPERIMENT_STARTED", f"Forward experiment '{self.experiment_id}' started at ${self.config.risk.initial_capital:.2f}")
 
         self.log_startup_system_info()
 
@@ -616,14 +666,33 @@ class PaperForwardEngine:
         up_mins, _ = divmod(up_rem, 60)
         uptime_str = f"{up_days}d {up_hrs:02d}h {up_mins:02d}m"
 
-        # System resources
+        # System resources (Lightweight, non-blocking process & filesystem stats)
         try:
+            import os
             import psutil
-            cpu_usage_pct = psutil.cpu_percent(interval=None)
-            ram_usage_pct = psutil.virtual_memory().percent
-            disk_usage_pct = psutil.disk_usage("/").percent
+            if not hasattr(self, "_proc") or self._proc is None:
+                self._proc = psutil.Process(os.getpid())
+                self._proc.cpu_percent(interval=None)
+
+            raw_cpu = self._proc.cpu_percent(interval=None)
+            num_cpus = psutil.cpu_count() or 1
+            cpu_usage_pct = max(0.1, round(raw_cpu / num_cpus, 1))
+
+            mem_info = self._proc.memory_info()
+            ram_mb = mem_info.rss / (1024 * 1024)
+            total_ram = psutil.virtual_memory().total
+            ram_usage_pct = round((mem_info.rss / total_ram) * 100.0, 1)
+
+            disk = psutil.disk_usage("/")
+            disk_usage_pct = round(disk.percent, 1)
+            disk_used_gb = disk.used / (1024 ** 3)
+
+            cpu_usage_str = f"{cpu_usage_pct:.1f}%"
+            ram_usage_str = f"{ram_usage_pct:.1f}% ({ram_mb:.0f} MB)"
+            disk_usage_str = f"{disk_usage_pct:.1f}%"
         except Exception:
-            cpu_usage_pct, ram_usage_pct, disk_usage_pct = 0.0, 0.0, 0.0
+            cpu_usage_pct, ram_usage_pct, disk_usage_pct = 0.1, 0.1, 0.1
+            cpu_usage_str, ram_usage_str, disk_usage_str = "0.1%", "0.1% (0 MB)", "0.1%"
 
         # Open PnL & Position update
         unrealized = 0.0
@@ -781,7 +850,7 @@ class PaperForwardEngine:
         elif self.feed.is_downloading_or_backfilling:
             conn_state = "RECONNECTING"
             engine_state = "BACKFILL"
-        elif feed_init and feed_healthy and (ws_conn or data_age <= 5.0):
+        elif feed_init and feed_healthy and (ws_conn or data_age <= self.feed.STALE_TIMEOUT):
             conn_state = "CONNECTED"
             engine_state = "LIVE"
         elif (self.feed.reconnect_count > 0 or self.feed.disconnect_count > 0) and not ws_conn:
@@ -802,7 +871,7 @@ class PaperForwardEngine:
         # State Transition Diagnostic Logger
         ws_thread_alive = self.feed._ws_thread.is_alive() if hasattr(self.feed, "_ws_thread") and self.feed._ws_thread else False
         is_reconnecting = (conn_state == "RECONNECTING") or (engine_state in ["RECOVERING", "BACKFILL"])
-        current_state_tuple = (conn_state, engine_state, feed_healthy, feed_init, ws_conn, latency_val)
+        current_state_tuple = (conn_state, engine_state, feed_healthy, feed_init, ws_conn, latency_val, self.feed.websocket_connects, self.feed.watchdog_disconnects)
         now_ts_sec = time.time()
         
         if (not hasattr(self, "_last_diag_tuple")) or (self._last_diag_tuple != current_state_tuple) or (now_ts_sec - getattr(self, "_last_diag_log_time", 0.0) >= 3.0):
@@ -813,7 +882,11 @@ class PaperForwardEngine:
                 f"[ConnDiag] time={ist_time} conn_state={conn_state} engine_state={engine_state} "
                 f"feed_healthy={feed_healthy} feed_init={feed_init} data_age={data_age:.1f}s "
                 f"last_msg_mono={self.feed.last_market_message_monotonic:.1f} ws_alive={ws_thread_alive} "
-                f"reconnecting={is_reconnecting} latency_ms={latency_val}"
+                f"reconnecting={is_reconnecting} latency_ms={latency_val} "
+                f"ws_connects={self.feed.websocket_connects} ws_disconnects={self.feed.websocket_disconnects} "
+                f"watchdog_disconnects={self.feed.watchdog_disconnects} genuine_ws_errors={self.feed.genuine_ws_errors} "
+                f"reconnect_attempts={self.feed.reconnect_attempts} successful_reconnects={self.feed.successful_reconnects} "
+                f"backfill_calls={self.feed.backfill_calls}"
             )
 
         # --- Setup Readiness Calculation ---
@@ -1085,6 +1158,9 @@ class PaperForwardEngine:
                 "cpu_usage_pct": round(cpu_usage_pct, 1),
                 "ram_usage_pct": round(ram_usage_pct, 1),
                 "disk_usage_pct": round(disk_usage_pct, 1),
+                "cpu_usage_str": cpu_usage_str,
+                "ram_usage_str": ram_usage_str,
+                "disk_usage_str": disk_usage_str,
                 "state_save_status": f"SAVED ({self.last_state_save_time})"
             }
         }

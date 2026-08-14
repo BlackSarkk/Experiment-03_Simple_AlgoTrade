@@ -9,6 +9,7 @@ executes REST backfill ONLY for missing gap upon recovery, and enforces thread-s
 import time
 import threading
 import json
+import collections
 from datetime import datetime, timezone, timedelta
 from typing import Callable, Optional, Dict, Any, List, Tuple
 import requests
@@ -49,6 +50,7 @@ class LiveMarketFeed:
         self.active_progress_task: Optional[Dict[str, Any]] = None
 
         self.bytes_received: int = 0
+        self._byte_samples: collections.deque = collections.deque(maxlen=300)
         self.last_bytes_count: int = 0
         self.last_speed_calc_time: float = time.time()
         self.current_feed_speed_bytes: float = 0.0
@@ -57,7 +59,7 @@ class LiveMarketFeed:
         self.last_market_message_monotonic: float = 0.0
         self.feed_initialized: bool = False
         self.feed_healthy: bool = False
-        self.STALE_TIMEOUT: float = 5.0
+        self.STALE_TIMEOUT: float = 15.0
         self._ws_app = None
 
         # Diagnostics & Call Counters
@@ -65,7 +67,14 @@ class LiveMarketFeed:
         self.full_history_download_calls: int = 0
         self.backfill_calls: int = 0
         self.websocket_connects: int = 0
+        self.websocket_disconnects: int = 0
+        self.watchdog_disconnects: int = 0
+        self.genuine_ws_errors: int = 0
+        self.reconnect_attempts: int = 0
+        self.successful_reconnects: int = 0
         self.processed_closed_candles: int = 0
+        self.has_connected_once: bool = False
+        self.reconnect_in_progress: bool = False
 
         # Concurrency Guard Lock
         self._download_lock = threading.Lock()
@@ -73,6 +82,7 @@ class LiveMarketFeed:
 
         self._ws_thread: Optional[threading.Thread] = None
         self._rest_thread: Optional[threading.Thread] = None
+        self._watchdog_thread: Optional[threading.Thread] = None
         self._on_tick_callbacks: List[Callable[[float], None]] = []
         self._on_3h_close_callbacks: List[Callable[[pd.DataFrame, Dict[str, Any], str], None]] = []
 
@@ -94,6 +104,11 @@ class LiveMarketFeed:
             "full_history_download_calls": self.full_history_download_calls,
             "backfill_calls": self.backfill_calls,
             "websocket_connects": self.websocket_connects,
+            "websocket_disconnects": self.websocket_disconnects,
+            "watchdog_disconnects": self.watchdog_disconnects,
+            "genuine_ws_errors": self.genuine_ws_errors,
+            "reconnect_attempts": self.reconnect_attempts,
+            "successful_reconnects": self.successful_reconnects,
             "processed_closed_candles": self.processed_closed_candles
         }
 
@@ -150,7 +165,9 @@ class LiveMarketFeed:
             self.latency_ms = (time.time() - start_req) * 1000.0
             if resp.status_code == 200:
                 data = resp.json()
-                self.bytes_received += len(resp.content)
+                b_count = len(resp.content)
+                self.bytes_received += b_count
+                self._byte_samples.append((time.time(), self.bytes_received))
                 price = float(data.get("lastPrice", data.get("price", 0.0)))
                 if price > 0:
                     self.current_price = price
@@ -171,15 +188,23 @@ class LiveMarketFeed:
         return self.current_price
 
     def get_feed_speed_str(self) -> str:
-        """Compute feed transfer speed with automatic units (B/s, KB/s, MB/s)."""
+        """Compute feed transfer speed using rolling window with automatic units (B/s, KB/s, MB/s)."""
         now = time.time()
-        dt = now - self.last_speed_calc_time
-        if dt >= 1.0:
-            self.current_feed_speed_bytes = (self.bytes_received - self.last_bytes_count) / dt
-            self.last_bytes_count = self.bytes_received
-            self.last_speed_calc_time = now
+        while self._byte_samples and (now - self._byte_samples[0][0] > 5.0):
+            self._byte_samples.popleft()
 
-        spd = self.current_feed_speed_bytes
+        if len(self._byte_samples) >= 2:
+            dt = now - self._byte_samples[0][0]
+            if dt >= 0.5:
+                bytes_delta = self.bytes_received - self._byte_samples[0][1]
+                spd = max(0.0, bytes_delta / dt)
+            else:
+                spd = getattr(self, "_last_calculated_spd", 0.0)
+        else:
+            spd = 0.0
+
+        self._last_calculated_spd = spd
+
         if spd >= 1024 * 1024:
             return f"{spd / (1024 * 1024):.1f} MB/s"
         elif spd >= 1024:
@@ -277,14 +302,17 @@ class LiveMarketFeed:
         self.last_market_message_monotonic = 0.0
         self.fetch_latest_ticker()
 
-        self._ws_thread = threading.Thread(target=self._ws_loop, daemon=True)
-        self._ws_thread.start()
+        if self._ws_thread is None or not self._ws_thread.is_alive():
+            self._ws_thread = threading.Thread(target=self._ws_loop, daemon=True)
+            self._ws_thread.start()
 
-        self._rest_thread = threading.Thread(target=self._rest_polling_loop, daemon=True)
-        self._rest_thread.start()
+        if self._rest_thread is None or not self._rest_thread.is_alive():
+            self._rest_thread = threading.Thread(target=self._rest_polling_loop, daemon=True)
+            self._rest_thread.start()
         
-        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
-        self._watchdog_thread.start()
+        if self._watchdog_thread is None or not self._watchdog_thread.is_alive():
+            self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+            self._watchdog_thread.start()
 
     def stop_feed(self):
         self.is_running = False
@@ -303,6 +331,7 @@ class LiveMarketFeed:
         self.ws_connected = False
         self.feed_healthy = False
         self.disconnect_count += 1
+        self.websocket_disconnects += 1
         if self._ws_app:
             try:
                 self._ws_app.keep_running = False
@@ -325,6 +354,12 @@ class LiveMarketFeed:
                     self.feed_healthy = False
                     self.ws_connected = False
                     self.disconnect_count += 1
+                    self.websocket_disconnects += 1
+                    self.watchdog_disconnects += 1
+                    logger.warning(
+                        f"[Watchdog] Stale market feed detected (data_age={data_age:.1f}s > {self.STALE_TIMEOUT}s). "
+                        f"watchdog_disconnects={self.watchdog_disconnects}. Closing socket."
+                    )
                     if self._ws_app:
                         try:
                             self._ws_app.keep_running = False
@@ -356,17 +391,31 @@ class LiveMarketFeed:
         backoff = 1.0
         stream_name = f"{self.symbol.lower()}@ticker"
         ws_url = f"wss://fstream.binance.com/ws/{stream_name}"
+        is_first_attempt = True
 
         while self.is_running:
+            if not is_first_attempt or self.has_connected_once:
+                self.reconnect_in_progress = True
+                self.reconnect_attempts += 1
+                self.reconnect_count = self.reconnect_attempts
+                logger.info(f"[*] Launching WebSocket reconnect attempt #{self.reconnect_attempts} after {backoff:.1f}s backoff...")
+                time.sleep(backoff)
+                backoff = min(backoff * 2.0, 15.0)
+
+            is_first_attempt = False
+
             try:
                 def on_message(ws, message):
                     try:
-                        self.bytes_received += len(message)
+                        b_cnt = len(message.encode("utf-8")) if isinstance(message, str) else len(message)
+                        self.bytes_received += b_cnt
+                        self._byte_samples.append((time.time(), self.bytes_received))
                         self.last_message_ts = time.time()
                         self.last_market_message_monotonic = time.monotonic()
                         self.feed_initialized = True
                         self.feed_healthy = True
                         self.ws_connected = True
+                        self.reconnect_in_progress = False
                         
                         data = json.loads(message)
                         event_time = data.get("E")
@@ -388,19 +437,34 @@ class LiveMarketFeed:
                         pass
 
                 def on_open(ws):
+                    nonlocal backoff
                     self.ws_connected = True
                     self.websocket_connects += 1
+                    if self.has_connected_once or self.websocket_connects > 1:
+                        self.successful_reconnects += 1
+                    self.has_connected_once = True
+                    self.reconnect_in_progress = False
+                    backoff = 1.0
                     logger.info(f"[+] WebSocket Stream connected ({self.symbol}). Total connects: {self.websocket_connects}")
 
                 def on_close(ws, close_status_code, close_msg):
                     if self.ws_connected:
                         self.disconnect_count += 1
+                        self.websocket_disconnects += 1
                     self.ws_connected = False
+                    if self.has_connected_once:
+                        self.reconnect_in_progress = True
+                    logger.info(f"[-] WebSocket closed (code={close_status_code}, msg={close_msg})")
 
                 def on_error(ws, error):
+                    self.genuine_ws_errors += 1
                     if self.ws_connected:
                         self.disconnect_count += 1
+                        self.websocket_disconnects += 1
                     self.ws_connected = False
+                    if self.has_connected_once:
+                        self.reconnect_in_progress = True
+                    logger.error(f"[-] WebSocket error: {error}")
 
                 self._ws_app = websocket.WebSocketApp(
                     ws_url,
@@ -413,18 +477,19 @@ class LiveMarketFeed:
                 self._ws_app.run_forever(ping_interval=15, ping_timeout=10)
 
             except Exception as e:
+                self.genuine_ws_errors += 1
                 if self.ws_connected:
                     self.disconnect_count += 1
+                    self.websocket_disconnects += 1
                 self.ws_connected = False
+                if self.has_connected_once:
+                    self.reconnect_in_progress = True
+                logger.error(f"[-] Exception in ws_loop: {e}")
             finally:
                 self._ws_app = None
 
             if not self.is_running:
                 break
-
-            self.reconnect_count += 1
-            time.sleep(backoff)
-            backoff = min(backoff * 2.0, 30.0)
 
     def _rest_polling_loop(self):
         """Fallback REST ticker polling every 2 seconds if WS is down, and 3h candle boundary checker."""

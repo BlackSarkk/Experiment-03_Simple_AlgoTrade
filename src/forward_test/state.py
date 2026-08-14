@@ -2,7 +2,7 @@
 Paper Forward Trading State Persistence Module.
 Provides atomic JSON state reads/writes for fault-tolerant crash recovery.
 Supports RESET_FORWARD_STATE and RESUME_FORWARD_STATE.
-Tracks Raspberry Pi 7-day experiment timer, restart count, and recovery metadata.
+Tracks forward test experiment timer, restart count, and recovery metadata.
 """
 
 import os

@@ -348,7 +348,10 @@ class PaperDashboard:
         bot_text.append(f"Feed: {bot.get('feed_speed', '0 B/s')}  │  ", style="dim white")
         bot_text.append(f"Last Update: {bot.get('last_market_update', 'N/A')}  │  ", style="dim white")
         bot_text.append(f"Reconnects: {bot.get('reconnect_count', 0)}  │  ", style="dim white")
-        bot_text.append(f"CPU: {bot.get('cpu_usage_pct', 0.0)}%  │  RAM: {bot.get('ram_usage_pct', 0.0)}%  │  Disk: {bot.get('disk_usage_pct', 0.0)}%  │  ", style="dim white")
+        cpu_str = bot.get('cpu_usage_str', f"{bot.get('cpu_usage_pct', 0.0)}%")
+        ram_str = bot.get('ram_usage_str', f"{bot.get('ram_usage_pct', 0.0)}%")
+        disk_str = bot.get('disk_usage_str', f"{bot.get('disk_usage_pct', 0.0)}%")
+        bot_text.append(f"CPU: {cpu_str}  │  RAM: {ram_str}  │  Disk: {disk_str}  │  ", style="dim white")
         bot_text.append(f"State: {bot.get('state_save_status', 'SAVED')}", style="bold green")
 
         return Panel(
