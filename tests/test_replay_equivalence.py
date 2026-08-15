@@ -110,8 +110,8 @@ class TestReplayEquivalence(unittest.TestCase):
                                 "entry_price": round(realized_entry, 2),
                                 "size": sizing.position_size,
                                 "nominal_value": sizing.nominal_position_value,
-                                "sl_price": sig.sl_price,
-                                "tp_price": sig.tp_price,
+                                "sl_price": sizing.sl_price,
+                                "tp_price": sizing.tp_price,
                                 "risk_budget": sizing.risk_amount,
                                 "entry_fee": round(entry_fee, 2),
                                 "duration_bars": 0

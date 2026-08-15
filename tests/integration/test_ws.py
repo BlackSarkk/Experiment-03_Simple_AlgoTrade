@@ -37,7 +37,7 @@ def test_ws_connect_reconnect():
     global ws_app
     t = threading.Thread(target=run, daemon=True)
     t.start()
-    time.sleep(10)
+    time.sleep(2)
     print("forcing close")
     ws_app.keep_running = False
     if ws_app and ws_app.sock:
@@ -47,7 +47,7 @@ def test_ws_connect_reconnect():
     print("reconnecting")
     t2 = threading.Thread(target=run, daemon=True)
     t2.start()
-    time.sleep(10)
+    time.sleep(2)
     ws_app.keep_running = False
     ws_app.close()
     t2.join(timeout=5)

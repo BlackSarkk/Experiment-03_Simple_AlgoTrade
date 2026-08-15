@@ -41,4 +41,5 @@ def run_test():
     
     time.sleep(5)
     
-run_test()
+if __name__ == '__main__':
+    run_test()

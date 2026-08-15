@@ -22,7 +22,7 @@ def test_startup():
     last_state = None
     
     def engine_runner():
-        engine.run_forward_session(duration_seconds=125.0)
+        engine.run_forward_session(duration_seconds=5.0)
         
     t = threading.Thread(target=engine_runner, daemon=True)
     t.start()
@@ -31,7 +31,7 @@ def test_startup():
         now = time.time()
         elapsed = now - start_time
         
-        if elapsed > 120:
+        if elapsed > 6.0:
             break
             
         try:

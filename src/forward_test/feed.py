@@ -257,6 +257,11 @@ class LiveMarketFeed:
                         new_df = new_raw_df
 
                     if not new_df.empty:
+                        # Drop currently forming candle (not fully closed)
+                        now_ts = int(time.time())
+                        interval_sec = resolution_to_seconds(self.resolution)
+                        new_df = new_df[new_df["timestamp"] + interval_sec <= now_ts]
+                        
                         merged = pd.concat([self.df_3h, new_df]).drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
                         new_candles_count = len(merged) - len(self.df_3h)
                         self.df_3h = merged
@@ -288,6 +293,11 @@ class LiveMarketFeed:
 
         if new_df.empty:
             return self.df_3h, 0
+
+        # Drop currently forming candle (not fully closed)
+        now_ts = int(time.time())
+        interval_sec = resolution_to_seconds(self.resolution)
+        new_df = new_df[new_df["timestamp"] + interval_sec <= now_ts]
 
         old_len = len(self.df_3h)
         merged = pd.concat([self.df_3h, new_df]).drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
