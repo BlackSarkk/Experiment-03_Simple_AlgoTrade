@@ -1,6 +1,10 @@
 {
+  "_name": "Default Preset",
+  "_description": "Standard 1m baseline fallback configuration",
+  "_validation": "None",
   "symbol": "ETHUSDT",
   "platform": "BINANCE_FUTURES",
+  "timeframe": "1m",
   "strategy": {
     "ema_period": 51,
     "rsi_period": 14,

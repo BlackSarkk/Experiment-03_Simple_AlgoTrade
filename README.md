@@ -43,6 +43,7 @@ Start a fresh forward test, pulling the latest data and resetting state with cus
 
 Start a fresh forward test, pulling the latest data and resetting state with default settings:
 ```bash
+./pipeline.sh --forward-test --reset --clear-cache
 ./pipeline.sh --forward-test --reset --clear-cache --deafult
 ```
 *Tip: For long-running forward tests (e.g., on a Raspberry Pi), it is highly recommended to run the pipeline inside a `tmux` session to prevent termination when your SSH connection drops.*

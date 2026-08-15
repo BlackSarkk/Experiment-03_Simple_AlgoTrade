@@ -1,4 +1,7 @@
 {
+  "_name": "Current 15m Baseline",
+  "_description": "Validated ETHUSDT 15m configuration",
+  "_validation": "2.5-year fixed backtest: +133.11%, PF 1.19, Max DD 26.49%, 383 trades",
   "symbol": "ETHUSDT",
   "platform": "BINANCE_FUTURES",
   "timeframe": "15m",

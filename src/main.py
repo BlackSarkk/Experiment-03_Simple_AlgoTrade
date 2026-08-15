@@ -185,9 +185,6 @@ def main():
 
     # Config Preset
     parser.add_argument("--config-preset", type=str, default="default", help="Config preset name")
-    
-    # Overrides (used for default preset timeframe injection from pipeline.sh)
-    parser.add_argument("--timeframe", type=str, default=None, help="Timeframe override")
 
     # Reset & Cache Controls (Defaults MUST be False for safety!)
     parser.add_argument("--reset", action="store_true", default=False, help="Stage-scoped reset")
@@ -217,15 +214,8 @@ def main():
     cfg.platform.symbol = preset_data.get("symbol", "ETHUSDT")
     cfg.platform.platform = preset_data.get("platform", "BINANCE_FUTURES")
     
-    # Timeframe logic:
-    # If preset is default, timeframe can be overridden by CLI (from pipeline.sh).
-    # If preset is explicit, timeframe comes strictly from preset JSON.
-    if args.config_preset == "default" and args.timeframe:
-        effective_timeframe = args.timeframe
-        tf_source = "pipeline.sh"
-    else:
-        effective_timeframe = preset_data.get("timeframe", args.timeframe or "1m")
-        tf_source = "preset" if args.config_preset != "default" else "pipeline.sh"
+    effective_timeframe = preset_data.get("timeframe", "1m")
+    tf_source = "preset"
         
     cfg.platform.resolution = effective_timeframe
     cfg.strategy.symbol = cfg.platform.symbol
@@ -264,11 +254,8 @@ def main():
     print("============================================================")
     print(" ACTIVE CONFIG PRESET")
     print(f" Preset: {args.config_preset}")
-    if args.config_preset == "default":
-        print(" Timeframe source: pipeline.sh")
-    else:
-        print(f" Source: configs/{args.config_preset}.json")
-        print(" Timeframe source: preset")
+    print(f" Source: configs/{args.config_preset}.json")
+    print(" Timeframe source: preset")
     print("============================================================")
 
     # Determine execution stage

@@ -6,7 +6,6 @@ set -e
 # ==============================================================================
 # STRATEGY & PIPELINE CONFIGURATION KNOBS
 # ==============================================================================
-TIMEFRAME="${TIMEFRAME:-"1m"}"
 CONFIG_PRESET="default"
 
 EXECUTION_MODE="REFERENCE"               # "REFERENCE" or "REALISTIC"
@@ -83,10 +82,6 @@ fi
 
 # Build Python execution string
 CMD=".venv/bin/python3 src/main.py --config-preset $CONFIG_PRESET --forward-mode $FORWARD_MODE --execution-mode $EXECUTION_MODE"
-
-if [ "$CONFIG_PRESET" = "default" ]; then
-    CMD="$CMD --timeframe $TIMEFRAME"
-fi
 
 if [ "$CLEAR_CACHE_ONLY" = true ]; then
   CMD="$CMD --clear-cache-only"
