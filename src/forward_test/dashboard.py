@@ -57,7 +57,7 @@ class PaperDashboard:
         header.append(")\n", style="dim white")
 
         # Render 4-row height mini candle matrix
-        plot_h = 4
+        plot_h = 3
         def p_to_y(p: float) -> int:
             y = int(((max_p - p) / p_range) * (plot_h - 1))
             return max(0, min(plot_h - 1, y))
@@ -192,7 +192,7 @@ class PaperDashboard:
         vol_style = "bold green" if vol_stat == "HIGH" else ("bold yellow" if vol_stat == "LOW" else "white")
 
         sig = mkt_trd.get("signal", "WAIT")
-        sig_style = "bold green" if sig == "BUY" else ("bold red" if sig == "SELL" else "white")
+        sig_style = "bold green" if sig == "BUY" else ("b# line ~60old red" if sig == "SELL" else "white")
 
         pos = mkt_trd.get("active_position")
         if pos and isinstance(pos, dict):
@@ -403,8 +403,8 @@ class PaperDashboard:
             max_p = min_p + 1.0
         p_range = max_p - min_p
 
-        # Main Plot Height (14 rows tall)
-        plot_h = 14
+        # Main Plot Height (10 rows tall instead of 14)
+        plot_h = 8
 
         def price_to_y(p: float) -> int:
             y = int(((max_p - p) / p_range) * (plot_h - 1))
@@ -561,7 +561,7 @@ class PaperDashboard:
         if eff_max_vol <= 0:
             eff_max_vol = max(vols) if (vols and max(vols) > 0) else 1.0
 
-        vol_h = 3
+        vol_h = 1
         if eff_max_vol >= 1_000_000:
             vol_lbl_str = f"{eff_max_vol/1_000_000:6.1f}M"
         else:
@@ -630,7 +630,6 @@ class PaperDashboard:
             sell_style = "bold bright_red" if bias == "SELL" else "dim white"
             
         table.add_row("BUY ", Text(buy_bar, style=buy_style), Text(f"{buy_pct}%", style=buy_style))
-        table.add_row("", "", "")
         table.add_row("SELL", Text(sell_bar, style=sell_style), Text(f"{sell_pct}%", style=sell_style))
         
         bias_style = "bold green" if bias == "BUY" else ("bold red" if bias == "SELL" else "dim white")
@@ -643,7 +642,7 @@ class PaperDashboard:
         else:
             status_style = "bold white"
         
-        footer = Text("\n")
+        footer = Text()
         footer.append(f"Bias: ", style="white")
         footer.append(f"{bias}\n", style=bias_style)
         footer.append(f"Status: ", style="white")
