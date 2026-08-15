@@ -793,8 +793,8 @@ class PaperForwardEngine:
         # Format 3 most recent completed trades for Recent Trade History panel
         recent_trades_formatted = []
         for t in list(reversed(self.trades_history))[:3]:
-            e_raw = t.get("entry_time", "")
-            x_raw = t.get("exit_time", "")
+            e_raw = t.get("entry_timestamp", "")
+            x_raw = t.get("exit_timestamp", "")
 
             e_str = "N/A"
             if e_raw:

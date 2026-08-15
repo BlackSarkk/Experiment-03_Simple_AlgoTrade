@@ -136,7 +136,7 @@ class PaperDashboard:
 
         top_text = Text()
         top_text.append(f"{top.get('ist_now', '2026-08-13 22:35:00 IST')}  │  ", style="bold cyan")
-        top_text.append(f"{top.get('symbol', 'ETHUSDT.P')}  │  {top.get('timeframe', '3h')}  │  {top.get('mode', 'PAPER')}  │  ", style="bold white")
+        top_text.append(f"{top.get('symbol', 'SYMBOL')}  │  {top.get('timeframe', 'TF')}  │  {top.get('mode', 'PAPER')}  │  ", style="bold white")
         top_text.append(f"{conn_str}", style=conn_style)
         
         lat = float(top.get('latency_ms', 12.0))
@@ -212,7 +212,7 @@ class PaperDashboard:
 
             pos_text = Text()
             pos_text.append(f"{side}", style=side_style)
-            pos_text.append(f" | Notional: ${notional:,.2f} | {qty:.4f} ETH | {lev:.1f}x | {exp_pct:.1f}% exp\n")
+            pos_text.append(f" | Notional: ${notional:,.2f} | {qty:.4f} Units | {lev:.1f}x | {exp_pct:.1f}% exp\n")
             pos_text.append(f"Entry: ${entry_p:,.2f} | Current: ${curr_p:,.2f}\n", style="white")
             pos_text.append(f"SL: ${sl_p:,.2f} | TP: ${tp_p:,.2f} | PnL: ", style="white")
             pos_text.append(f"${pnl_val:+,.2f} ({pnl_pct_val:+.2f}%)\n", style=pnl_style)
@@ -256,7 +256,7 @@ class PaperDashboard:
                 t["exit_time_ist"],
                 f"${t['entry_price']:,.2f}",
                 f"${t['exit_price']:,.2f}",
-                f"{t['size']:.4f} ETH",
+                f"{t['size']:.4f} Units",
                 f"[{pnl_color}]${t['net_pnl']:+,.2f}[/{pnl_color}]"
             )
 
@@ -264,7 +264,7 @@ class PaperDashboard:
         padded_rows_needed = 3 - len(displayed_trades)
         for i in range(padded_rows_needed):
             if i == 0 and not displayed_trades:
-                history_table.add_row("-", "FLAT", "N/A", "N/A", "$0.00", "$0.00", "0.0000 ETH", "$0.00")
+                history_table.add_row("-", "FLAT", "N/A", "N/A", "$0.00", "$0.00", "0.0000 Units", "$0.00")
             else:
                 history_table.add_row("-", "-", "-", "-", "-", "-", "-", "-")
 

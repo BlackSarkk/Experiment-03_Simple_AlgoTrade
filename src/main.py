@@ -28,11 +28,13 @@ logger = setup_logger("Main")
 console = Console()
 
 
-def print_banner():
-    banner = """
+def print_banner(cfg: PipelineConfig):
+    symbol = cfg.platform.symbol or "ETHUSDT"
+    res = (cfg.platform.resolution or "3H").upper()
+    banner = f"""
 ================================================================================
-          ETH STRATEGY PIPELINE — ETHUSDT 3H RULE-BASED ENGINE
-       51 EMA | RSI [35-65] | 8-Candle Consolidation | 1.5R | 3.5x Leverage
+          STRATEGY PIPELINE — {symbol} {res} RULE-BASED ENGINE
+       {cfg.strategy.ema_period} EMA | RSI [{cfg.strategy.rsi_oversold}-{cfg.strategy.rsi_overbought}] | {cfg.strategy.consolidation_candles}-Candle Consolidation | {cfg.strategy.risk_reward_ratio}R | {cfg.risk.leverage}x Leverage
 ================================================================================
 """
     print(banner)
@@ -122,7 +124,7 @@ def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False):
         logger.info("[+] Market cache cleared. Exiting immediately (--clear-cache-only).")
         sys.exit(0)
 
-    print_banner()
+    print_banner(cfg)
     print_effective_strategy_configuration(cfg)
     print_run_configuration_panel(cfg)
 
