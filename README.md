@@ -36,9 +36,14 @@ Run a backtest using a specific configuration preset:
 ```
 
 ### Forward Testing (Paper Trading)
-Start a fresh forward test, pulling the latest data and resetting state:
+Start a fresh forward test, pulling the latest data and resetting state with custom config:
 ```bash
 ./pipeline.sh --forward-test --reset --clear-cache --config1_ETHUSDT-15m
+```
+
+Start a fresh forward test, pulling the latest data and resetting state with default settings:
+```bash
+./pipeline.sh --forward-test --reset --clear-cache --deafult
 ```
 *Tip: For long-running forward tests (e.g., on a Raspberry Pi), it is highly recommended to run the pipeline inside a `tmux` session to prevent termination when your SSH connection drops.*
 
