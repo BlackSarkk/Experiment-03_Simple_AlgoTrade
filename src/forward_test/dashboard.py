@@ -57,7 +57,7 @@ class PaperDashboard:
         header.append(")\n", style="dim white")
 
         # Render 4-row height mini candle matrix
-        plot_h = 3
+        plot_h = 2
         def p_to_y(p: float) -> int:
             y = int(((max_p - p) / p_range) * (plot_h - 1))
             return max(0, min(plot_h - 1, y))
