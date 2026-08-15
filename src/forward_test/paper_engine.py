@@ -37,7 +37,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 
 class PaperForwardEngine:
-    """Real-time paper forward trading engine for ETHUSDT 3h strategy."""
+    """Real-time paper forward trading engine for configurable symbol/timeframe strategy."""
 
     TRADE_COLUMNS = [
         "experiment_id", "trade_id", "side", "signal_timestamp", "entry_timestamp", "entry_price",
@@ -248,8 +248,8 @@ class PaperForwardEngine:
                 try:
                     df_tr = pd.read_csv(self.trades_path)
                     self.trades_history = df_tr.to_dict("records")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[ForwardState] Could not load trades history from {self.trades_path}: {e}. Starting with empty history.")
 
             self.log_event("PROCESS_RESTART", f"Resumed forward experiment '{self.experiment_id}' (Restart #{self.process_restart_count}). Balance=${self.account.balance:.2f}")
         else:
@@ -347,6 +347,11 @@ class PaperForwardEngine:
             return
 
         pos = self.active_position
+        
+        # In REFERENCE mode, do NOT evaluate SL/TP on the entry candle (duration_bars == 0)
+        if self.config.execution.mode == "REFERENCE":
+            if pos.get("duration_bars", 0) == 0:
+                return
         side = pos["side"]
         sl = pos["sl_price"]
         tp = pos["tp_price"]
@@ -387,7 +392,8 @@ class PaperForwardEngine:
         if not pos:
             return
 
-        exit_time = exit_time_str or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S+00:00")
+        now_str = getattr(self.feed, "current_simulated_time", None) or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S+00:00")
+        exit_time = exit_time_str or now_str
         size = pos["size"]
         entry_price = pos["entry_price"]
 
@@ -504,6 +510,9 @@ class PaperForwardEngine:
 
     def on_3h_candle_closed(self, df_3h: pd.DataFrame, closed_row: Dict[str, Any], source: str = "LIVE", precomputed: bool = False):
         """Evaluate strategy signals ONLY on completed 3h candle closures occurring AFTER startup."""
+        if self.active_position is not None:
+            self.active_position["duration_bars"] = self.active_position.get("duration_bars", 0) + 1
+            
         closed_ts = int(closed_row.get("timestamp", 0))
         closed_dt_str = str(closed_row.get("datetime", "N/A"))
 
@@ -581,7 +590,7 @@ class PaperForwardEngine:
                 self.active_position = {
                     "side": sig.signal_type,
                     "signal_timestamp": sig.datetime_str,
-                    "entry_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S+00:00"),
+                    "entry_time": getattr(self.feed, "current_simulated_time", None) or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S+00:00"),
                     "entry_price": round(realized_entry, 2),
                     "size": sizing.position_size,
                     "nominal_value": sizing.nominal_position_value,
@@ -1212,12 +1221,56 @@ class PaperForwardEngine:
                 self.feed.start_feed()
                 live.update(self.dashboard.render(self.build_dashboard_state()))
 
+                # ── STARTUP HEALTH GATE ──────────────────────────────────────
+                # Wait up to 30s for: WS thread alive + WS connected + feed initialized
+                logger.info("[*] Startup health gate: waiting for WebSocket connection and feed init (timeout 30s)...")
+                _gate_start = time.time()
+                while True:
+                    ws_alive = (
+                        self.feed._ws_thread is not None
+                        and self.feed._ws_thread.is_alive()
+                    )
+                    if self.feed.ws_thread_died.is_set():
+                        raise RuntimeError(
+                            "STARTUP FAILED: WebSocket worker thread (_ws_loop) died at startup. "
+                            "Check logs for the root cause (import error, connection error, etc.)."
+                        )
+                    if not ws_alive and (time.time() - _gate_start) > 5.0:
+                        raise RuntimeError(
+                            "STARTUP FAILED: WebSocket thread is not alive 5s after start_feed(). "
+                            "Cannot proceed with live forward test."
+                        )
+                    if self.feed.feed_initialized and self.feed.ws_connected and self.feed.current_price > 0:
+                        logger.info(
+                            f"[+] Startup health gate PASSED: ws_alive={ws_alive}, "
+                            f"ws_connected={self.feed.ws_connected}, "
+                            f"feed_initialized={self.feed.feed_initialized}, "
+                            f"price={self.feed.current_price:.2f}"
+                        )
+                        break
+                    if (time.time() - _gate_start) > 30.0:
+                        raise RuntimeError(
+                            "STARTUP FAILED: Feed not initialized after 30s. "
+                            f"ws_alive={ws_alive}, ws_connected={self.feed.ws_connected}, "
+                            f"feed_initialized={self.feed.feed_initialized}, "
+                            f"price={self.feed.current_price:.2f}"
+                        )
+                    live.update(self.dashboard.render(self.build_dashboard_state()))
+                    time.sleep(0.5)
+                # ── END STARTUP HEALTH GATE ──────────────────────────────────
+
                 logger.info("[+] Starting Paper Forward Trading Session. Rendering Redesigned Live Dashboard...")
 
                 while True:
                     if duration_seconds and (time.time() - start_ts) >= duration_seconds:
                         break
 
+                    # Dead WS thread check — fail loudly rather than running silently paused
+                    if self.feed.ws_thread_died.is_set():
+                        raise RuntimeError(
+                            "CRITICAL: WebSocket worker thread died during live forward test. "
+                            "Trading halted. Check logs for root cause."
+                        )
                     dashboard_state = self.build_dashboard_state()
                     live.update(self.dashboard.render(dashboard_state))
 

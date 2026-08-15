@@ -154,6 +154,28 @@ class MarketDataLoader:
         resampled["timestamp"] = resampled["timestamp"].astype(int)
         return resampled
 
+    def download_binance_klines(
+        self,
+        symbol: str,
+        interval: str,
+        days: int = 1,
+        quiet: bool = True,
+    ) -> pd.DataFrame:
+        """Public wrapper for feed.py backfill: download recent Binance Futures klines by symbol/interval/days.
+
+        Bridges the gap between feed.py's simple (symbol, interval, days) call signature
+        and the internal _fetch_binance_futures(cfg, ...) which expects a PlatformConfig.
+        """
+        from common.config import PlatformConfig  # local import to avoid circular at module level
+        cfg = PlatformConfig()
+        cfg.symbol = symbol.upper()
+        cfg.resolution = interval
+        cfg.platform = "BINANCE_FUTURES"
+        cfg.start_date = None
+        cfg.end_date = None
+        cfg.days = days
+        return self._fetch_binance_futures(cfg, resolution=interval, quiet=quiet)
+
     def _fetch_binance_futures(
         self,
         cfg: PlatformConfig,

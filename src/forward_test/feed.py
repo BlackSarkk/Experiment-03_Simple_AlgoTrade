@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Callable, Optional, Dict, Any, List, Tuple
 import requests
 import pandas as pd
+import websocket  # websocket-client required; add websocket-client>=1.3.0 to requirements.txt
 
 from common.config import PlatformConfig
 from common.market_data import MarketDataLoader
@@ -26,7 +27,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 class LiveMarketFeed:
     """Live streaming market feed for Binance USD-M Perpetual Futures."""
 
-    WS_URL = "wss://fstream.binance.com/ws/ethusdt@miniTicker"
+    WS_URL_TEMPLATE = "wss://fstream.binance.com/ws/{symbol}@ticker"  # symbol injected at connect time
     REST_TICKER_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     REST_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 
@@ -54,7 +55,7 @@ class LiveMarketFeed:
         self.last_bytes_count: int = 0
         self.last_speed_calc_time: float = time.time()
         self.current_feed_speed_bytes: float = 0.0
-        self.last_update_ts: float = 0.0
+        # Note: last_update_ts declared once above — do NOT redeclare here
         self.last_message_ts: float = 0.0
         self.last_market_message_monotonic: float = 0.0
         self.feed_initialized: bool = False
@@ -83,6 +84,8 @@ class LiveMarketFeed:
         self._ws_thread: Optional[threading.Thread] = None
         self._rest_thread: Optional[threading.Thread] = None
         self._watchdog_thread: Optional[threading.Thread] = None
+        # Set when _ws_loop exits unexpectedly (not via stop_feed) so callers can detect failure
+        self.ws_thread_died: threading.Event = threading.Event()
         self._on_tick_callbacks: List[Callable[[float], None]] = []
         self._on_3h_close_callbacks: List[Callable[[pd.DataFrame, Dict[str, Any], str], None]] = []
 
@@ -179,8 +182,8 @@ class LiveMarketFeed:
                     self.feed_initialized = True
                     self.feed_healthy = True
                     return price
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[fetch_latest_ticker] REST request failed: {e}")
 
         if self.current_price > 0:
             self.bid_price = self.current_price * 0.9999
@@ -231,7 +234,9 @@ class LiveMarketFeed:
         new_candles_count = 0
         try:
             if not self.df_3h.empty:
-                last_cached_ts = int(self.df_3h["timestamp"].max() / 1000)
+                # Use last_closed_3h_ts which is already maintained as a correct UNIX-seconds timestamp.
+                # Do NOT divide df_3h["timestamp"] by 1000 — df_3h timestamps are in seconds, not ms.
+                last_cached_ts = self.last_closed_3h_ts if self.last_closed_3h_ts > 0 else int(self.df_3h["timestamp"].max())
                 now_ts = int(time.time())
                 interval_sec = resolution_to_seconds(self.resolution)
                 missing_sec = now_ts - last_cached_ts
@@ -247,7 +252,7 @@ class LiveMarketFeed:
                     )
 
                     if needs_resample:
-                        new_df = resample_ohlcv(new_raw_df, target_tf=self.resolution)
+                        new_df = self.data_loader.resample_ohlcv(new_raw_df, self.resolution)
                     else:
                         new_df = new_raw_df
 
@@ -277,7 +282,7 @@ class LiveMarketFeed:
             return self.df_3h, 0
 
         if needs_resample:
-            new_df = resample_ohlcv(raw_df, target_tf=self.resolution)
+            new_df = self.data_loader.resample_ohlcv(raw_df, self.resolution)
         else:
             new_df = raw_df
 
@@ -323,8 +328,8 @@ class LiveMarketFeed:
                 if self._ws_app.sock:
                     self._ws_app.sock.close()
                 self._ws_app.close()
-            except:
-                pass
+            except Exception:
+                pass  # Best-effort socket close on shutdown — ignore errors
 
     def trigger_forced_disconnect(self):
         """Forced disconnect helper for testing LIVE -> DISCONNECTED -> RECONNECTING -> BACKFILL -> LIVE."""
@@ -338,8 +343,8 @@ class LiveMarketFeed:
                 if self._ws_app.sock:
                     self._ws_app.sock.close()
                 self._ws_app.close()
-            except:
-                pass
+            except Exception:
+                pass  # Best-effort socket close on forced disconnect
 
     def _watchdog_loop(self):
         """Independent periodic watchdog running every 0.5s."""
@@ -366,8 +371,8 @@ class LiveMarketFeed:
                             if self._ws_app.sock:
                                 self._ws_app.sock.close()
                             self._ws_app.close()
-                        except:
-                            pass
+                        except Exception:
+                            pass  # Best-effort socket close from watchdog
             else:
                 self.feed_healthy = True
             time.sleep(0.5)
@@ -386,11 +391,9 @@ class LiveMarketFeed:
         return not self.is_feed_healthy()
 
     def _ws_loop(self):
-        import websocket
-
         backoff = 1.0
-        stream_name = f"{self.symbol.lower()}@ticker"
-        ws_url = f"wss://fstream.binance.com/ws/{stream_name}"
+        # Build WS URL from symbol — do NOT use the hardcoded WS_URL_TEMPLATE class attr
+        ws_url = self.WS_URL_TEMPLATE.format(symbol=self.symbol.lower())
         is_first_attempt = True
 
         while self.is_running:
@@ -491,6 +494,13 @@ class LiveMarketFeed:
             if not self.is_running:
                 break
 
+        # Signal that this thread has exited while feed is still supposed to be running
+        if self.is_running:
+            logger.error("[CRITICAL] WebSocket worker thread (_ws_loop) exited while feed.is_running=True. "
+                         "Trading is paused. Check logs for the root cause.")
+            self.ws_thread_died.set()
+            self.feed_healthy = False
+
     def _rest_polling_loop(self):
         """Fallback REST ticker polling every 2 seconds if WS is down, and 3h candle boundary checker."""
         while self.is_running:
@@ -505,48 +515,86 @@ class LiveMarketFeed:
             time.sleep(1.5)
 
     def _check_3h_candle_boundary(self):
-        """Check if current UTC time has passed a 3h candle boundary and fetch ONLY the new closed 3h candle."""
+        """Check if current UTC time has passed a 3h candle boundary and fetch ALL new closed candles.
+
+        Fixes:
+        - Fetches from last_closed_3h_ts+1 using startTime so no candles are missed (no limit=5 truncation).
+        - Uses Binance close-time field (k[6]) to definitively exclude the currently-open candle.
+        - Fires one strategy callback per new closed candle in chronological order.
+        """
         now_ts = int(time.time())
         interval_sec = resolution_to_seconds(self.resolution)
         next_close_ts = self.last_closed_3h_ts + interval_sec
-        if now_ts >= next_close_ts:
-            if self.is_downloading_or_backfilling:
+        if now_ts < next_close_ts:
+            return
+        if self.is_downloading_or_backfilling:
+            return
+
+        try:
+            fetch_res, needs_resample = self._get_fetch_interval()
+            fetch_interval_sec = resolution_to_seconds(fetch_res)
+            # startTime: first candle AFTER our last known closed candle (in ms)
+            start_ms = (self.last_closed_3h_ts + fetch_interval_sec) * 1000
+            params = {
+                "symbol":    self.symbol,
+                "interval":  fetch_res,
+                "startTime": start_ms,
+                "limit":     1000,   # max allowed; catches large gaps without truncation
+            }
+            resp = requests.get(self.REST_KLINES_URL, params=params, timeout=5)
+            if resp.status_code != 200:
+                return
+            klines = resp.json()
+            if not klines:
                 return
 
-            try:
-                fetch_res, needs_resample = self._get_fetch_interval()
-                params = {"symbol": self.symbol, "interval": fetch_res, "limit": 5}
-                resp = requests.get(self.REST_KLINES_URL, params=params, timeout=5)
-                if resp.status_code == 200:
-                    klines = resp.json()
-                    if klines:
-                        records = []
-                        for k in klines:
-                            records.append({
-                                "timestamp": int(k[0] / 1000),
-                                "open": float(k[1]),
-                                "high": float(k[2]),
-                                "low": float(k[3]),
-                                "close": float(k[4]),
-                                "volume": float(k[5]),
-                            })
-                        df_base = pd.DataFrame(records)
-                        df_base["datetime"] = pd.to_datetime(df_base["timestamp"], unit="s", utc=True)
-                        if needs_resample:
-                            df_recent = self.data_loader.resample_ohlcv(df_base, self.resolution)
-                        else:
-                            df_recent = df_base
+            records = []
+            for k in klines:
+                open_ts    = int(k[0] / 1000)
+                close_ts_k = int(k[6] / 1000)   # Binance close-time: definitive "is this candle closed?"
+                # Only include candles whose close-time is in the past
+                if close_ts_k >= now_ts:
+                    continue
+                records.append({
+                    "timestamp": open_ts,
+                    "open":   float(k[1]),
+                    "high":   float(k[2]),
+                    "low":    float(k[3]),
+                    "close":  float(k[4]),
+                    "volume": float(k[5]),
+                })
 
-                        df_new = df_recent[df_recent["timestamp"] > self.last_closed_3h_ts]
+            if not records:
+                return
 
-                        if not df_new.empty:
-                            new_last_ts = int(df_new.iloc[-1]["timestamp"])
-                            self.df_3h = pd.concat([self.df_3h, df_new], ignore_index=True)
-                            self.df_3h = self.df_3h.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-                            self.last_closed_3h_ts = new_last_ts
-                            self.processed_closed_candles += len(df_new)
-                            closed_row = df_new.iloc[-1].to_dict()
-                            for cb in self._on_3h_close_callbacks:
-                                cb(self.df_3h, closed_row, "LIVE")
-            except Exception:
-                pass
+            df_base = pd.DataFrame(records)
+            df_base["datetime"] = pd.to_datetime(df_base["timestamp"], unit="s", utc=True)
+            if needs_resample:
+                df_recent = self.data_loader.resample_ohlcv(df_base, self.resolution)
+            else:
+                df_recent = df_base
+
+            df_new = df_recent[df_recent["timestamp"] > self.last_closed_3h_ts].copy()
+
+            if df_new.empty:
+                return
+
+            # Append all new candles to historical df (deduplicated)
+            self.df_3h = pd.concat([self.df_3h, df_new], ignore_index=True)
+            self.df_3h = (
+                self.df_3h
+                .drop_duplicates(subset=["timestamp"])
+                .sort_values("timestamp")
+                .reset_index(drop=True)
+            )
+            self.processed_closed_candles += len(df_new)
+
+            # Fire one callback per closed candle in chronological order
+            for _, row in df_new.sort_values("timestamp").iterrows():
+                self.last_closed_3h_ts = int(row["timestamp"])
+                closed_row = row.to_dict()
+                for cb in self._on_3h_close_callbacks:
+                    cb(self.df_3h, closed_row, "LIVE")
+
+        except Exception as e:
+            logger.warning(f"[_check_3h_candle_boundary] Exception: {e}")

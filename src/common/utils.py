@@ -85,7 +85,10 @@ def format_percent(value: float) -> str:
 
 
 def resolution_to_seconds(res: str) -> int:
-    """Convert resolution string (e.g. 1m, 3h, 1d) to seconds."""
+    """Convert resolution string (e.g. 1m, 3h, 1d) to seconds.
+
+    Raises ValueError for unrecognized resolution strings to prevent silent misconfiguration.
+    """
     res = str(res).lower().strip()
     if res.endswith("m"):
         return int(res[:-1]) * 60
@@ -93,4 +96,4 @@ def resolution_to_seconds(res: str) -> int:
         return int(res[:-1]) * 3600
     elif res.endswith("d"):
         return int(res[:-1]) * 86400
-    return 10800
+    raise ValueError(f"Unrecognized resolution string: '{res}'. Expected format: '1m', '3h', '1d', etc.")
