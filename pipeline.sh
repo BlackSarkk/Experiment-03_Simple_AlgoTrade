@@ -8,10 +8,10 @@ set -e
 # ==============================================================================
 SYMBOL="ETHUSDT"
 PLATFORM="BINANCE_FUTURES"
-TIMEFRAME="${TIMEFRAME:-"3m"}"
+TIMEFRAME="${TIMEFRAME:-"1m"}"
 
 INITIAL_BALANCE=10000
-LEVERAGE=3.5
+LEVERAGE=1
 RISK_PER_TRADE_PCT=1.5
 MAX_POSITION_ALLOCATION_PCT=50
 RR_RATIO=1.5
