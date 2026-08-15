@@ -183,26 +183,11 @@ def main():
     parser.add_argument("--robustness", action="store_true", default=False, help="Run robustness testing suite")
     parser.add_argument("--forward-test", action="store_true", default=False, help="Run paper forward test engine")
 
-    # Asset & Platform
-    parser.add_argument("--symbol", type=str, default="ETHUSDT")
-    parser.add_argument("--platform", type=str, default="BINANCE_FUTURES")
-    parser.add_argument("--timeframe", type=str, default="3h")
-    parser.add_argument("--start-date", type=str, default="2024-01-01")
-    parser.add_argument("--end-date", type=str, default="2026-08-13")
-
-    # Risk & Capital
-    parser.add_argument("--initial-capital", type=float, default=10000.0)
-    parser.add_argument("--leverage", type=float, default=3.5)
-    parser.add_argument("--risk-pct", type=float, default=1.5)
-    parser.add_argument("--max-alloc-pct", type=float, default=50.0)
-    parser.add_argument("--rr-ratio", type=float, default=1.5)
-
-    # Execution & Fees
-    parser.add_argument("--execution-mode", type=str, default="REFERENCE", choices=["REFERENCE", "REALISTIC"])
-    parser.add_argument("--commission-pct", type=float, default=0.05)
-    parser.add_argument("--maker-fee-pct", type=float, default=0.02)
-    parser.add_argument("--slippage-pct", type=float, default=0.03)
-    parser.add_argument("--slippage-ticks", type=float, default=1.0)
+    # Config Preset
+    parser.add_argument("--config-preset", type=str, default="default", help="Config preset name")
+    
+    # Overrides (used for default preset timeframe injection from pipeline.sh)
+    parser.add_argument("--timeframe", type=str, default=None, help="Timeframe override")
 
     # Reset & Cache Controls (Defaults MUST be False for safety!)
     parser.add_argument("--reset", action="store_true", default=False, help="Stage-scoped reset")
@@ -212,25 +197,79 @@ def main():
     parser.add_argument("--reset-forward-state", action="store_true", default=False, help="Reset forward paper state")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume existing forward paper state")
     parser.add_argument("--no-resume", action="store_false", dest="resume", help="Do not resume forward paper state")
-
-    # Strategy Parameters Configuration
-    parser.add_argument("--ema-period", type=int, default=51)
-    parser.add_argument("--rsi-period", type=int, default=14)
-    parser.add_argument("--rsi-overbought", type=float, default=65.0)
-    parser.add_argument("--rsi-oversold", type=float, default=35.0)
-    parser.add_argument("--atr-period", type=int, default=14)
-    parser.add_argument("--consolidation-candles", type=int, default=8)
-    parser.add_argument("--consolidation-atr-mult", type=float, default=2.2)
-    parser.add_argument("--swing-lookback", type=int, default=8)
-    parser.add_argument("--volume-sma-period", type=int, default=20)
-    parser.add_argument("--volume-mult", type=float, default=1.0)
-    parser.add_argument("--long-enabled", type=str_to_bool, default=True)
-    parser.add_argument("--short-enabled", type=str_to_bool, default=True)
+    
+    parser.add_argument("--execution-mode", type=str, default="REFERENCE", choices=["REFERENCE", "REALISTIC"])
     parser.add_argument("--forward-mode", type=str, default="PAPER")
 
     args = parser.parse_args()
 
     cfg = PipelineConfig()
+
+    import json
+    config_path = f"configs/{args.config_preset}.json"
+    if not os.path.exists(config_path):
+        print(f"ERROR: Config preset '{config_path}' does not exist.")
+        sys.exit(1)
+        
+    with open(config_path, "r") as f:
+        preset_data = json.load(f)
+
+    cfg.platform.symbol = preset_data.get("symbol", "ETHUSDT")
+    cfg.platform.platform = preset_data.get("platform", "BINANCE_FUTURES")
+    
+    # Timeframe logic:
+    # If preset is default, timeframe can be overridden by CLI (from pipeline.sh).
+    # If preset is explicit, timeframe comes strictly from preset JSON.
+    if args.config_preset == "default" and args.timeframe:
+        effective_timeframe = args.timeframe
+        tf_source = "pipeline.sh"
+    else:
+        effective_timeframe = preset_data.get("timeframe", args.timeframe or "1m")
+        tf_source = "preset" if args.config_preset != "default" else "pipeline.sh"
+        
+    cfg.platform.resolution = effective_timeframe
+    cfg.strategy.symbol = cfg.platform.symbol
+    cfg.strategy.resolution = effective_timeframe
+
+    s_data = preset_data.get("strategy", {})
+    cfg.strategy.ema_period = s_data.get("ema_period", 51)
+    cfg.strategy.rsi_period = s_data.get("rsi_period", 14)
+    cfg.strategy.rsi_overbought = s_data.get("rsi_overbought", 65.0)
+    cfg.strategy.rsi_oversold = s_data.get("rsi_oversold", 35.0)
+    cfg.strategy.atr_period = s_data.get("atr_period", 14)
+    cfg.strategy.consolidation_candles = s_data.get("consolidation_candles", 8)
+    cfg.strategy.consolidation_atr_mult = s_data.get("consolidation_atr_mult", 2.2)
+    cfg.strategy.swing_lookback = s_data.get("swing_lookback", 8)
+    cfg.strategy.volume_sma_period = s_data.get("volume_sma_period", 20)
+    cfg.strategy.use_volume_filter = True if cfg.strategy.volume_sma_period > 0 else False
+    cfg.strategy.volume_mult = s_data.get("volume_mult", 1.0)
+    cfg.strategy.long_enabled = s_data.get("long_enabled", True)
+    cfg.strategy.short_enabled = s_data.get("short_enabled", True)
+    cfg.strategy.risk_reward_ratio = s_data.get("risk_reward_ratio", 1.5)
+
+    r_data = preset_data.get("risk", {})
+    cfg.risk.initial_capital = r_data.get("initial_capital", 10000.0)
+    cfg.risk.leverage = r_data.get("leverage", 1.0)
+    cfg.risk.risk_per_trade_pct = r_data.get("risk_per_trade_pct", 1.5) / 100.0
+    cfg.risk.max_position_allocation_pct = r_data.get("max_position_allocation_pct", 50.0) / 100.0
+
+    e_data = preset_data.get("execution", {})
+    cfg.execution.mode = args.execution_mode
+    cfg.execution.taker_fee_pct = e_data.get("commission_pct", 0.05) / 100.0
+    cfg.execution.maker_fee_pct = e_data.get("maker_fee_pct", 0.02) / 100.0
+    cfg.execution.slippage_pct = e_data.get("slippage_pct", 0.03) / 100.0
+    cfg.execution.slippage_ticks = e_data.get("slippage_ticks", 1.0)
+
+    # Startup display
+    print("============================================================")
+    print(" ACTIVE CONFIG PRESET")
+    print(f" Preset: {args.config_preset}")
+    if args.config_preset == "default":
+        print(" Timeframe source: pipeline.sh")
+    else:
+        print(f" Source: configs/{args.config_preset}.json")
+        print(" Timeframe source: preset")
+    print("============================================================")
 
     # Determine execution stage
     if args.forward_test:
@@ -255,47 +294,13 @@ def main():
     cfg.reset_cache = cfg.clear_cache
     cfg.reset_forward_state = args.reset_forward_state or args.reset
     cfg.resume_forward_state = args.resume and not args.reset
+    
+    if not cfg.run_forward_test:
+        cfg.platform.start_date = "2024-01-01"
+        cfg.platform.end_date = "2026-08-13"
 
-    cfg.platform.symbol = args.symbol
-    cfg.platform.platform = args.platform
-    cfg.platform.resolution = args.timeframe
-    if cfg.run_forward_test:
-        cfg.platform.start_date = None
-        cfg.platform.end_date = None
-        cfg.platform.days = 60
-    else:
-        cfg.platform.start_date = args.start_date
-        cfg.platform.end_date = args.end_date
-
-    cfg.strategy.symbol = args.symbol
-    cfg.strategy.resolution = args.timeframe
-    cfg.strategy.risk_reward_ratio = args.rr_ratio
-
-    cfg.strategy.ema_period = args.ema_period
-    cfg.strategy.rsi_period = args.rsi_period
-    cfg.strategy.rsi_overbought = args.rsi_overbought
-    cfg.strategy.rsi_oversold = args.rsi_oversold
-    cfg.strategy.atr_period = args.atr_period
-    cfg.strategy.consolidation_candles = args.consolidation_candles
-    cfg.strategy.consolidation_atr_mult = args.consolidation_atr_mult
-    cfg.strategy.swing_lookback = args.swing_lookback
-    cfg.strategy.volume_sma_period = args.volume_sma_period
-    cfg.strategy.volume_mult = args.volume_mult
-    cfg.strategy.long_enabled = args.long_enabled
-    cfg.strategy.short_enabled = args.short_enabled
     cfg.forward_mode = args.forward_mode
-
-    cfg.risk.initial_capital = args.initial_capital
-    cfg.risk.leverage = args.leverage
-    cfg.risk.risk_per_trade_pct = args.risk_pct / 100.0
-    cfg.risk.max_position_allocation_pct = args.max_alloc_pct / 100.0
-
-    cfg.execution.mode = args.execution_mode
-    cfg.execution.taker_fee_pct = args.commission_pct / 100.0
-    cfg.execution.maker_fee_pct = args.maker_fee_pct / 100.0
-    cfg.execution.slippage_pct = args.slippage_pct / 100.0
-    cfg.execution.slippage_ticks = args.slippage_ticks
-
+    
     run_pipeline(cfg, clear_cache_only=args.clear_cache_only)
 
 

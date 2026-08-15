@@ -1,0 +1,29 @@
+{
+  "symbol": "ETHUSDT",
+  "platform": "BINANCE_FUTURES",
+  "strategy": {
+    "ema_period": 51,
+    "rsi_period": 14,
+    "rsi_overbought": 65.0,
+    "rsi_oversold": 35.0,
+    "atr_period": 14,
+    "consolidation_candles": 8,
+    "consolidation_atr_mult": 2.2,
+    "swing_lookback": 8,
+    "volume_sma_period": 20,
+    "volume_mult": 1.0,
+    "long_enabled": true,
+    "short_enabled": true,
+    "risk_reward_ratio": 1.5
+  },
+  "risk": {
+    "initial_capital": 10000.0,
+    "leverage": 3.5,
+    "risk_per_trade_pct": 1.5,
+    "max_position_allocation_pct": 50.0
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1
+  }
+}

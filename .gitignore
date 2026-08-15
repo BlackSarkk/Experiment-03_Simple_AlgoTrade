@@ -123,3 +123,14 @@ dist/
 delta_algo/data/
 delta_algo/output/
 delta_algo/__pycache__/
+# ============================================================
+# Ad-hoc test scripts and optimization scratch files
+# ============================================================
+test_config.py
+src/optimization/deep_15m_optimizer.py
+src/optimization/dry_run_1m.py
+src/optimization/fetch_delta.py
+src/optimization/fixed_15m_test.py
+src/optimization/run_1m_experiments.py
+src/optimization/run_3m_experiments.py
+src/optimization/fix_regimes.py
