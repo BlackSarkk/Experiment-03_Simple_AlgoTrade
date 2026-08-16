@@ -18,6 +18,7 @@ from datetime import datetime, timezone, timedelta
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
+from rich.segment import Segment, Segments
 from rich.table import Table
 from rich.text import Text
 from common.utils import resolution_to_seconds
@@ -289,6 +290,74 @@ class PaperDashboard:
             self._chart_h_override = max(2, available)
         return self._build(state)
 
+    def render_viewport(self, state: Dict[str, Any], offset: int = 0):
+        """Render the dashboard and return the slice of it that fits the terminal.
+
+        Returns (renderable, total_lines, max_offset, clamped_offset).
+
+        This is what makes a too-small window usable WITHOUT flooding the scrollback.
+        Letting the terminal scroll means every refresh appends another full copy of the
+        dashboard, so scrolling up just walks back through thousands of duplicates. Here
+        the dashboard is rendered once to lines, and only a window into it is handed to
+        Live — so the display stays pinned and one screen tall, and scrolling moves the
+        window rather than emitting more output.
+        """
+        panel = self.render(state)
+        view_h = self.console.height or 50
+        width = self.console.width or 200
+        options = self.console.options.update(height=None)
+        lines = self.console.render_lines(panel, options, pad=True)
+
+        total = len(lines)
+        if total <= view_h:
+            segments: List[Segment] = []
+            for i, line in enumerate(lines):
+                segments.extend(line)
+                if i != len(lines) - 1:
+                    segments.append(Segment.line())
+            return Segments(segments), total, 0, 0
+
+        # Reserve the bottom row for a pinned scroll bar. Putting the indicator in the
+        # dashboard footer would only reveal it once already scrolled to the bottom —
+        # useless for telling the user that scrolling is possible in the first place.
+        avail = max(1, view_h - 1)
+        max_offset = max(0, total - avail)
+        off = max(0, min(int(offset), max_offset))
+
+        segments = []
+        for line in lines[off:off + avail]:
+            segments.extend(line)
+            segments.append(Segment.line())
+
+        shown_to = min(total, off + avail)
+        at = "TOP" if off == 0 else ("END" if off >= max_offset else f"{off + 1}")
+        label = f" ↕ rows {off + 1}-{shown_to} of {total} [{at}]   ↑↓ PgUp/PgDn Home/End "
+        label = label[:width].ljust(width)
+        segments.append(Segment(label, self.console.get_style("bold white on dark_blue")))
+        return Segments(segments), total, max_offset, off
+
+    def measure(self, state: Dict[str, Any]) -> int:
+        """Rendered height in lines for the current terminal width, without printing."""
+        term_w = self.console.width if (self.console and self.console.width) else 200
+        term_h = self.console.height if (self.console and self.console.height) else 50
+        probe = Console(width=term_w, height=term_h, file=io.StringIO())
+        probe.print(self.render(state))
+        return len(probe.file.getvalue().rstrip("\n").split("\n"))
+
+    def fits_terminal(self, state: Dict[str, Any], margin: int = 0) -> bool:
+        """True when the fully rendered dashboard fits the terminal viewport.
+
+        The caller uses this to decide between a pinned full-screen display and a
+        normal-buffer display that the terminal can scroll. The chart already shrinks to
+        absorb spare rows, so a False here means the fixed panels alone exceed the
+        window and something WOULD be cropped.
+        """
+        term_h = self.console.height if (self.console and self.console.height) else 50
+        try:
+            return self.measure(state) + margin <= term_h
+        except Exception:
+            return True     # measurement is advisory; never block the session on it
+
     def _build(self, state: Dict[str, Any]) -> Panel:
         top = state.get("top_bar", {})
         candles = state.get("chart_candles", [])
@@ -530,14 +599,13 @@ class PaperDashboard:
         # -------------------------------------------------------------
         # 5. Bottom Status Row Footer
         # -------------------------------------------------------------
-        bot_text = Text()
-        bot_text.append(f"Feed: {bot.get('feed_speed', '0 B/s')}  │  ", style="dim white")
-        bot_text.append(f"Last Update: {bot.get('last_market_update', 'N/A')}  │  ", style="dim white")
-        bot_text.append(f"Reconnects: {bot.get('reconnect_count', 0)}  │  ", style="dim white")
+        # The footer is a Panel subtitle, which Rich truncates rather than wraps. A narrow
+        # window therefore used to silently amputate the tail of the line — Temp and State
+        # vanished entirely at 100 columns. Build it from prioritised segments instead and
+        # drop the least important ones until it fits, so the fields that matter survive.
         cpu_str = bot.get('cpu_usage_str') or "n/a"
         ram_str = bot.get('ram_usage_str') or "n/a"
         disk_str = bot.get('disk_usage_str') or "n/a"
-        bot_text.append(f"CPU: {cpu_str}  │  RAM: {ram_str}  │  Disk: {disk_str}  │  ", style="dim white")
 
         # CPU temperature, colour-graded so a thermal problem is visible at a glance.
         temp_c = bot.get('cpu_temp_c')
@@ -550,11 +618,42 @@ class PaperDashboard:
             temp_style = "bold yellow"
         else:
             temp_style = "bold green"
-        bot_text.append("Temp: ", style="dim white")
-        bot_text.append(f"{temp_str}", style=temp_style)
-        bot_text.append("  │  ", style="dim white")
 
-        bot_text.append(f"State: {bot.get('state_save_status', 'SAVED')}", style="bold green")
+        # (priority, long form, short form, style). Lower priority = dropped last.
+        segments = [
+            (7, f"Feed: {bot.get('feed_speed', '0 B/s')}", None, "dim white"),
+            (6, f"Last Update: {bot.get('last_market_update', 'N/A')}",
+                f"Upd: {bot.get('last_market_update', 'N/A')}", "dim white"),
+            (5, f"Reconnects: {bot.get('reconnect_count', 0)}",
+                f"RC: {bot.get('reconnect_count', 0)}", "dim white"),
+            (2, f"CPU: {cpu_str}", f"C {cpu_str}", "dim white"),
+            (3, f"RAM: {ram_str}", f"R {ram_str}", "dim white"),
+            (4, f"Disk: {disk_str}", f"D {disk_str}", "dim white"),
+            (1, f"Temp: {temp_str}", f"T {temp_str}", temp_style),
+            (0, f"State: {bot.get('state_save_status', 'SAVED')}",
+                f"{bot.get('state_save_status', 'SAVED')}", "bold green"),
+        ]
+
+
+        sep = "  │  "
+        term_w = self.console.width if (self.console and self.console.width) else 200
+        budget = max(20, term_w - 10)      # panel border + corner padding
+
+        def _width(items, short):
+            return sum(len(s[2] if (short and s[2]) else s[1]) for s in items) + len(sep) * max(0, len(items) - 1)
+
+        chosen, use_short = list(segments), False
+        if _width(chosen, False) > budget:
+            use_short = True                                   # 1) abbreviate labels
+            while len(chosen) > 1 and _width(chosen, True) > budget:
+                worst = max(chosen, key=lambda s: s[0])         # 2) drop lowest priority
+                chosen.remove(worst)
+
+        bot_text = Text()
+        for i, seg in enumerate(chosen):
+            if i:
+                bot_text.append(sep, style="dim white")
+            bot_text.append(seg[2] if (use_short and seg[2]) else seg[1], style=seg[3])
 
         return Panel(
             content_table,

@@ -946,6 +946,131 @@ class PaperForwardEngine:
             "temp_str": f"{cpu_temp_c:.0f}°C" if cpu_temp_c is not None else "n/a",
         }
 
+    # --- Scrollable dashboard viewport ------------------------------------------------
+    # Keys are read in cbreak mode, which leaves ISIG enabled so Ctrl+C still raises
+    # KeyboardInterrupt and the session shuts down normally.
+    _SCROLL_KEYS = {
+        "\x1b[A": -1, "\x1b[B": +1,            # arrow up / down
+        "\x1b[5~": -10, "\x1b[6~": +10,        # page up / down
+        "k": -1, "j": +1,                      # vi-style
+    }
+    _SCROLL_HOME = ("\x1b[H", "\x1b[1~", "g")
+    _SCROLL_END = ("\x1b[F", "\x1b[4~", "G")
+
+    def _start_key_reader(self) -> None:
+        """Put stdin in cbreak mode so arrow keys can be polled without blocking."""
+        self._key_fd = None
+        self._key_saved = None
+        try:
+            import termios, tty
+            if not sys.stdin.isatty():
+                return
+            fd = sys.stdin.fileno()
+            self._key_saved = termios.tcgetattr(fd)
+            tty.setcbreak(fd)      # cbreak, NOT raw: Ctrl+C keeps working
+            self._key_fd = fd
+        except Exception:
+            self._key_fd = None    # headless/piped stdin: scrolling simply unavailable
+
+    def _stop_key_reader(self) -> None:
+        """Always restore the terminal, even if the session died unexpectedly."""
+        try:
+            import termios
+            if self._key_fd is not None and self._key_saved is not None:
+                termios.tcsetattr(self._key_fd, termios.TCSADRAIN, self._key_saved)
+        except Exception:
+            pass
+        finally:
+            self._key_fd = None
+            self._key_saved = None
+
+    def _poll_scroll_input(self, max_offset: int) -> None:
+        """Drain pending keypresses and move the viewport offset."""
+        if self._key_fd is None:
+            return
+        try:
+            import select
+            data = ""
+            while select.select([self._key_fd], [], [], 0)[0]:
+                chunk = os.read(self._key_fd, 1024)
+                if not chunk:
+                    break
+                data += chunk.decode("utf-8", "ignore")
+            if not data:
+                return
+
+            offset = getattr(self, "_scroll_offset", 0)
+            i = 0
+            while i < len(data):
+                matched = False
+                # Longest-first so "\x1b[5~" is not mistaken for "\x1b[5"
+                for seq in sorted(set(list(self._SCROLL_KEYS) + list(self._SCROLL_HOME)
+                                      + list(self._SCROLL_END)), key=len, reverse=True):
+                    if data.startswith(seq, i):
+                        if seq in self._SCROLL_HOME:
+                            offset = 0
+                        elif seq in self._SCROLL_END:
+                            offset = max_offset
+                        else:
+                            offset += self._SCROLL_KEYS[seq]
+                        i += len(seq)
+                        matched = True
+                        break
+                if not matched:
+                    i += 1
+            self._scroll_offset = max(0, min(offset, max_offset))
+        except Exception:
+            pass
+
+    def _render_live_view(self, state: Dict[str, Any]):
+        """Dashboard clipped to one screen, with the scroll offset applied."""
+        try:
+            offset = getattr(self, "_scroll_offset", 0)
+            # Probe with the current offset to learn the true extent, then annotate.
+            _, total, max_offset, _ = self.dashboard.render_viewport(state, offset)
+            if max_offset > 0:
+                self._poll_scroll_input(max_offset)
+                offset = getattr(self, "_scroll_offset", 0)
+                if not getattr(self, "_logged_scrollable", False):
+                    self._logged_scrollable = True
+                    logger.info(
+                        f"Dashboard needs {total} rows, terminal has "
+                        f"{self.console.height}: viewport is scrollable "
+                        f"(arrow keys / PgUp / PgDn / Home / End; mouse wheel in most "
+                        f"terminals). Display stays pinned — no scrollback spam."
+                    )
+            else:
+                self._scroll_offset = 0
+            view, _, _, _ = self.dashboard.render_viewport(state, offset)
+            return view
+        except Exception:
+            return self.dashboard.render(state)
+
+    def _indicator_frame(self) -> pd.DataFrame:
+        """`feed.df_3h` with indicator columns attached, cached per closed candle.
+
+        The feed stores RAW OHLCV only — `load_ohlcv()` returns
+        [timestamp, open, high, low, close, volume, datetime] and nothing else. Display
+        code that reached for indicators with `row.get("ema_51", close)` therefore always
+        took the fallback, which is why the chart legend showed EMA 51 and EMA 200 as the
+        same number (both were simply the close price), and why the readiness preview was
+        seeded from price instead of real EMA/RSI/ATR values.
+
+        Trading is unaffected either way: `on_3h_candle_closed()` computes indicators from
+        scratch before generating signals. This frame is for the dashboard only.
+        """
+        df = getattr(self.feed, "df_3h", None)
+        if df is None or df.empty:
+            return df
+        try:
+            key = (len(df), int(df.iloc[-1].get("timestamp", 0)))
+            if getattr(self, "_ind_cache_key", None) != key:
+                self._ind_cache = compute_all_indicators(df.copy(), self.config.strategy)
+                self._ind_cache_key = key
+            return self._ind_cache
+        except Exception:
+            return df       # never let a display concern break the session
+
     def build_dashboard_state(self) -> Dict[str, Any]:
         c_price = self.feed.current_price or 0.0
         now_dt = datetime.now(timezone.utc)
@@ -954,9 +1079,17 @@ class PaperForwardEngine:
         app_start_dt = datetime.fromtimestamp(self.start_time, tz=timezone.utc).astimezone(IST)
         app_start_time_ist = app_start_dt.strftime("%Y-%m-%d %H:%M:%S IST")
 
-        last_update_ts = self.feed.last_update_ts or time.time()
-        last_update_dt = datetime.fromtimestamp(last_update_ts, tz=timezone.utc).astimezone(IST)
-        last_market_update_ist = last_update_dt.strftime("%H:%M:%S IST")
+        # "Last Update" is the clock time of the most recent successful market-data
+        # refresh — a staleness indicator. Falling back to time.time() when the feed has
+        # NEVER updated made a dead feed look like it had just refreshed, which is the
+        # exact opposite of what this field is for.
+        last_update_ts = self.feed.last_update_ts or 0.0
+        if last_update_ts > 0:
+            last_update_dt = datetime.fromtimestamp(last_update_ts, tz=timezone.utc).astimezone(IST)
+            _age = max(0, int(time.time() - last_update_ts))
+            last_market_update_ist = f"{last_update_dt.strftime('%H:%M:%S IST')} ({_age}s ago)"
+        else:
+            last_market_update_ist = "never"
 
         # Uptime math
         uptime_secs = int(max(0, time.time() - self.start_time))
@@ -1090,10 +1223,12 @@ class PaperForwardEngine:
                 "exit_reason": t.get("exit_reason", "N/A")
             })
 
-        # Chart candles (recent 90 3h candles)
+        # Chart candles (recent 90 3h candles). Indicator-attached so the EMA overlays and
+        # legend show real EMAs rather than falling back to the close price.
         recent_candles = []
-        if not self.feed.df_3h.empty:
-            recent_df = self.feed.df_3h.tail(150)
+        _chart_df = self._indicator_frame()
+        if _chart_df is not None and not _chart_df.empty:
+            recent_df = _chart_df.tail(150)
             for _, r in recent_df.iterrows():
                 recent_candles.append({
                     "timestamp": int(r.get("timestamp", 0)),
@@ -1205,8 +1340,13 @@ class PaperForwardEngine:
                 buy_raw = 0.0
                 sell_raw = 100.0
         elif not self.feed.df_3h.empty and len(self.feed.df_3h) >= 10:
-            # High-performance O(1) incremental provisional indicator calculation
-            history_df = self.feed.df_3h
+            # High-performance O(1) incremental provisional indicator calculation.
+            # Seeded from the indicator-attached frame: the raw feed has no ema/rsi/atr
+            # columns, so the `.get(..., fallback)` reads below would otherwise silently
+            # seed every preview from the current price.
+            history_df = self._indicator_frame()
+            if history_df is None or history_df.empty:
+                history_df = self.feed.df_3h
             prev_closed_row = history_df.iloc[-1]
             prev2_closed_row = history_df.iloc[-2] if len(history_df) >= 2 else prev_closed_row
 
@@ -1466,35 +1606,44 @@ class PaperForwardEngine:
         # We need to access utils
         from common.utils import mute_console_loggers, unmute_console_loggers
 
-        # Start single Rich Live dashboard instance BEFORE recovery/warmup/connect
-        # screen=True renders into the terminal's alternate screen buffer: the dashboard
-        # is pinned to the viewport, never scrolls, leaves no scrollback trail, and the
-        # original terminal contents are restored on exit.
-        with Live(self.dashboard.render(self.build_dashboard_state()), console=self.console,
-                  refresh_per_second=2, screen=True) as live:
+        # Start single Rich Live dashboard instance BEFORE recovery/warmup/connect.
+        #
+        # screen=True always: the alternate screen buffer pins the dashboard to the
+        # viewport and never writes to the terminal's scrollback, so the display cannot
+        # accumulate duplicate frames. When the window is too small to show everything,
+        # the dashboard is clipped to a scrollable VIEWPORT (see _render_live_view) that
+        # the user moves with the arrow keys, rather than letting the terminal scroll —
+        # the latter re-emits the whole dashboard on every refresh, which turns the
+        # scrollback into an endless loop of stale copies.
+        self._scroll_offset = 0
+        self._start_key_reader()
+        _boot_state = self.build_dashboard_state()
+
+        with Live(self._render_live_view(_boot_state), console=self.console,
+                  refresh_per_second=2, screen=True, vertical_overflow="crop") as live:
             # Mute console StreamHandlers so stdout belongs 100% exclusively to Rich Live
             mute_console_loggers()
 
             try:
                 self.load_or_init_state()
-                live.update(self.dashboard.render(self.build_dashboard_state()))
+                live.update(self._render_live_view(self.build_dashboard_state()))
 
                 self.feed.warm_up_historical_data(days=60)
                 self.last_warmup_candle_ts = self.feed.last_closed_3h_ts
-                live.update(self.dashboard.render(self.build_dashboard_state()))
+                live.update(self._render_live_view(self.build_dashboard_state()))
 
                 # Check if an open position existed during an outage and reconstruct if SL/TP was hit
                 if self.active_position:
                     last_ts = self.feed.last_closed_3h_ts
                     self.feed.backfill_missing_outage_candles(last_ts)
                     self.check_and_reconstruct_offline_position_outage(self.feed.df_3h)
-                    live.update(self.dashboard.render(self.build_dashboard_state()))
+                    live.update(self._render_live_view(self.build_dashboard_state()))
 
                 # Wire callbacks
                 self.feed.add_tick_callback(self.evaluate_live_tick)
                 self.feed.add_3h_close_callback(self.on_3h_candle_closed)
                 self.feed.start_feed()
-                live.update(self.dashboard.render(self.build_dashboard_state()))
+                live.update(self._render_live_view(self.build_dashboard_state()))
 
                 # ── STARTUP HEALTH GATE ──────────────────────────────────────
                 # Wait up to 30s for: WS thread alive + WS connected + feed initialized
@@ -1530,7 +1679,7 @@ class PaperForwardEngine:
                             f"feed_initialized={self.feed.feed_initialized}, "
                             f"price={self.feed.current_price:.2f}"
                         )
-                    live.update(self.dashboard.render(self.build_dashboard_state()))
+                    live.update(self._render_live_view(self.build_dashboard_state()))
                     time.sleep(0.5)
                 # ── END STARTUP HEALTH GATE ──────────────────────────────────
 
@@ -1547,7 +1696,7 @@ class PaperForwardEngine:
                             "Trading halted. Check logs for root cause."
                         )
                     dashboard_state = self.build_dashboard_state()
-                    live.update(self.dashboard.render(dashboard_state))
+                    live.update(self._render_live_view(dashboard_state))
 
                     # Atomic state auto-save every auto_save_seconds (30 sec)
                     now_ts = time.time()
@@ -1564,5 +1713,6 @@ class PaperForwardEngine:
                 self.feed.stop_feed()
                 self.save_state(self.feed.current_price)
                 self.update_global_tracker()
+                self._stop_key_reader()      # restore cooked-mode stdin, always
                 unmute_console_loggers()
                 logger.info("[+] Paper Forward Session stopped cleanly. State saved.")

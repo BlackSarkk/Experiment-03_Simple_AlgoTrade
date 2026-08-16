@@ -192,12 +192,19 @@ class LiveMarketFeed:
             self.ask_price = self.current_price * 1.0001
         return self.current_price
 
+    # Rolling window for the throughput readout. This MUST be comfortably longer than the
+    # gap between arrivals: the REST ticker fallback refreshes about every 6s, so a 5s
+    # window pruned itself down to a single sample between polls, hit the `>= 2` guard and
+    # reported "0 B/s" continuously even while the feed was perfectly healthy.
+    FEED_SPEED_WINDOW_SEC = 30.0
+
     def get_feed_speed_str(self) -> str:
         """Compute feed transfer speed using rolling window with automatic units (B/s, KB/s, MB/s)."""
         now = time.time()
-        while self._byte_samples and (now - self._byte_samples[0][0] > 5.0):
+        while self._byte_samples and (now - self._byte_samples[0][0] > self.FEED_SPEED_WINDOW_SEC):
             self._byte_samples.popleft()
 
+        spd = 0.0
         if len(self._byte_samples) >= 2:
             dt = now - self._byte_samples[0][0]
             if dt >= 0.5:
@@ -205,8 +212,14 @@ class LiveMarketFeed:
                 spd = max(0.0, bytes_delta / dt)
             else:
                 spd = getattr(self, "_last_calculated_spd", 0.0)
-        else:
-            spd = 0.0
+        elif self._byte_samples:
+            # Exactly one arrival inside the window: still a real, measurable rate —
+            # bytes since that sample over the time since it landed.
+            dt = max(1e-6, now - self._byte_samples[0][0])
+            if dt >= 0.5:
+                spd = max(0.0, (self.bytes_received - self._byte_samples[0][1]) / dt)
+            else:
+                spd = getattr(self, "_last_calculated_spd", 0.0)
 
         self._last_calculated_spd = spd
 
