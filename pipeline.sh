@@ -6,13 +6,15 @@ set -e
 # ==============================================================================
 # STRATEGY & PIPELINE CONFIGURATION KNOBS
 # ==============================================================================
-DEFAULT_CONFIG="configs/default.json"
+DEFAULT_CONFIG="configs/config/default.json"
 CONFIG_ARG="$DEFAULT_CONFIG"
 CONFIG_SUPPLIED=false
 
 EXECUTION_MODE="REFERENCE"               # "REFERENCE" or "REALISTIC"
 
 EXECUTION_SUPPLIED=false
+OPTIMIZE=false
+OPTIMIZE_ARGS=()
 
 # Default Flags (SAFE DEFAULTS: RESET=false, CLEAR_CACHE=false, CLEAR_CACHE_ONLY=false)
 CLEAR_CACHE_ONLY=${CLEAR_CACHE_ONLY:-false}
@@ -27,7 +29,7 @@ FORWARD_TEST=${FORWARD_TEST:-false}
 FORWARD_MODE=${FORWARD_MODE:-"PAPER"}
 RESUME_FORWARD_STATE=${RESUME_FORWARD_STATE:-true}
 
-KNOWN_FLAGS=(--backtest --forward-test --historical-replay --robustness
+KNOWN_FLAGS=(--backtest --forward-test --historical-replay --robustness --optimize
              --config --reset --hard-reset --clear-cache --reset-cache
              --clear-cache-only --resume --help)
 
@@ -41,6 +43,13 @@ ETH Strategy Pipeline — rule-based ETHUSDT.P research pipeline
 USAGE
   ./pipeline.sh --config <config-file> <action> [options]
   ./pipeline.sh <maintenance-action>
+
+OPTIMIZER MODE (mutually exclusive with every action below)
+  --optimize --<preset>.json --<output>.json
+                         Run the auto-optimizer. <preset> resolves under
+                         configs/optimize/, <output> is the runnable strategy
+                         config created in configs/config/. The output name is
+                         MANDATORY and an existing file is never overwritten.
 
 ACTIONS (exactly one required; each needs --config)
   --backtest             Historical backtest        -> results/backtest/
@@ -63,10 +72,10 @@ OPTIONS
 
 CONFIG RESOLUTION
   --config is tried in this order, first hit wins:
-      <arg>  ->  <arg>.json  ->  configs/<arg>  ->  configs/<arg>.json
+      <arg>  ->  <arg>.json  ->  configs/config/<arg>  ->  configs/config/<arg>.json
   So these are equivalent:
       --config config1-ETHUSDTP15m-long.json
-      --config configs/config1-ETHUSDTP15m-long.json
+      --config configs/config/config1-ETHUSDTP15m-long.json
       --config config1-ETHUSDTP15m-long
 
 EXAMPLES
@@ -76,15 +85,16 @@ EXAMPLES
   ./pipeline.sh --config config1-ETHUSDTP15m-long.json --historical-replay
   ./pipeline.sh --config default.json --backtest --reset --clear-cache
   ./pipeline.sh --hard-reset
+  ./pipeline.sh --optimize --odefault.json --mywinner.json
 EOF
 }
 
 list_configs() {
   echo "Available configs:"
-  if ls configs/*.json >/dev/null 2>&1; then
-    ls -1 configs/*.json | sed 's|^|  |'
+  if ls configs/config/*.json >/dev/null 2>&1; then
+    ls -1 configs/config/*.json | sed 's|^|  |'
   else
-    echo "  (none found in configs/)"
+    echo "  (none found in configs/config/)"
   fi
 }
 
@@ -105,6 +115,26 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       usage
       exit 0
+      ;;
+    --optimize)
+      OPTIMIZE=true
+      shift
+      # Everything after --optimize belongs to the optimizer, except flags that
+      # are execution/maintenance actions — those are conflicts and must be
+      # reported, not silently swallowed.
+      while [[ $# -gt 0 ]]; do
+        case $1 in
+          --backtest|--forward-test|--historical-replay|--robustness|--config|--config=*|\
+          --reset|--hard-reset|--clear-cache|--reset-cache|--clear-cache-only|--resume)
+            OPTIMIZE_CONFLICT="$1"
+            shift
+            ;;
+          *)
+            OPTIMIZE_ARGS+=("$1")
+            shift
+            ;;
+        esac
+      done
       ;;
     --clear-cache-only)
       CLEAR_CACHE_ONLY=true
@@ -209,6 +239,32 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ------------------------------------------------------------------
+# Optimizer mode. Mutually exclusive with every execution and maintenance
+# action: the optimizer owns the whole run, so mixing modes is always a
+# mistake rather than a shorthand.
+# ------------------------------------------------------------------
+if [ "$OPTIMIZE" = true ]; then
+  # Conflicting flags that appeared BEFORE --optimize on the command line.
+  if [ -z "${OPTIMIZE_CONFLICT:-}" ]; then
+    if [ "$BACKTEST" = true ];      then OPTIMIZE_CONFLICT="--backtest"; fi
+    if [ "$FORWARD_TEST" = true ];  then OPTIMIZE_CONFLICT="--forward-test"; fi
+    if [ "$ROBUSTNESS" = true ];    then OPTIMIZE_CONFLICT="--robustness"; fi
+    if [ "$CONFIG_SUPPLIED" = true ]; then OPTIMIZE_CONFLICT="--config"; fi
+    if [ "$RESET" = true ];         then OPTIMIZE_CONFLICT="--reset"; fi
+    if [ "$HARD_RESET" = true ];    then OPTIMIZE_CONFLICT="--hard-reset"; fi
+    if [ "$CLEAR_CACHE" = true ];   then OPTIMIZE_CONFLICT="--clear-cache"; fi
+    if [ "$CLEAR_CACHE_ONLY" = true ]; then OPTIMIZE_CONFLICT="--clear-cache-only"; fi
+  fi
+  if [ -n "${OPTIMIZE_CONFLICT:-}" ]; then
+    echo "ERROR: --optimize cannot be combined with $OPTIMIZE_CONFLICT" >&2
+    echo "       Optimizer mode is exclusive. Run it on its own:" >&2
+    echo "         ./pipeline.sh --optimize --odefault.json --mywinner.json" >&2
+    exit 1
+  fi
+  exec .venv/bin/python3 src/auto_optimise/cli.py ${OPTIMIZE_ARGS[@]+"${OPTIMIZE_ARGS[@]}"}
+fi
+
+# ------------------------------------------------------------------
 # Decide the action FIRST, so "no action" is reported before anything
 # config-related is printed.
 # ------------------------------------------------------------------
@@ -234,17 +290,17 @@ fi
 
 # ------------------------------------------------------------------
 # Resolve --config to an actual file. Accepted forms:
-#   configs/name.json | name.json | name   (searched in ./ then ./configs/)
+#   configs/config/name.json | name.json | name   (searched in ./ then ./configs/config/)
 # ------------------------------------------------------------------
 CONFIG_PATH=""
-for cand in "$CONFIG_ARG" "$CONFIG_ARG.json" "configs/$CONFIG_ARG" "configs/$CONFIG_ARG.json"; do
+for cand in "$CONFIG_ARG" "$CONFIG_ARG.json" "configs/config/$CONFIG_ARG" "configs/config/$CONFIG_ARG.json"; do
   if [ -f "$cand" ]; then CONFIG_PATH="$cand"; break; fi
 done
 
 if [ -z "$CONFIG_PATH" ]; then
   echo "ERROR: Config file not found: '$CONFIG_ARG'"
   echo "       Looked for, in order:"
-  for cand in "$CONFIG_ARG" "$CONFIG_ARG.json" "configs/$CONFIG_ARG" "configs/$CONFIG_ARG.json"; do
+  for cand in "$CONFIG_ARG" "$CONFIG_ARG.json" "configs/config/$CONFIG_ARG" "configs/config/$CONFIG_ARG.json"; do
     echo "         - $cand"
   done
   echo ""

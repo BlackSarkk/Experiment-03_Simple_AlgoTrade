@@ -33,7 +33,7 @@ TEMPLATE = r'''//@version=5
 strategy("{title}", shorttitle="{short}", overlay=true, initial_capital={capital}, default_qty_type=strategy.cash, commission_type=strategy.commission.percent, commission_value={commission}, slippage={slippage}, process_orders_on_close=false, pyramiding=0, margin_long=0, margin_short=0)
 
 // =============================================================================
-// {title} — generated from configs/{cfgfile}
+// {title} — generated from configs/config/{cfgfile}
 // =============================================================================
 // Source        : {source}
 // Development   : {dev_start} -> {dev_end}
@@ -311,7 +311,7 @@ def main():
         if pinefile in PROTECTED:
             print(f"  SKIP {pinefile} (protected: frozen baseline)")
             continue
-        d = json.load(open(os.path.join(ROOT, "configs", cfgfile)))
+        d = json.load(open(os.path.join(ROOT, "configs", "config", cfgfile)))
         s, r, b, e = d["strategy"], d["risk"], d["filters"]["bollinger"], d["execution"]
         m = d.get("_reference_metrics", {})
         uo, un = m.get("unseen_filter_off", {}), m.get("unseen_filter_on", {})
@@ -343,7 +343,7 @@ def main():
             ref_uon_dd=un.get("max_dd_pct"), ref_uon_n=un.get("trades"),
         )
         open(os.path.join(OUT, pinefile), "w").write(src)
-        print(f"  pine/{pinefile}  <- configs/{cfgfile}")
+        print(f"  pine/{pinefile}  <- configs/config/{cfgfile}")
 
 
 if __name__ == "__main__":

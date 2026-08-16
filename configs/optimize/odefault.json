@@ -1,0 +1,31 @@
+{
+  "_schema_version": 1,
+  "_comment": "Human-facing optimizer input. Search ranges, objective weights, Optuna internals, warmup, partitions, seeds and storage paths are automatic and deliberately not exposed here.",
+
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+
+  "history": {
+    "days": 180,
+    "start_date": null,
+    "end_date": null
+  },
+
+  "initial_balance": 10000,
+
+  "direction": {
+    "long_enabled": true,
+    "short_enabled": false
+  },
+
+  "trials": "auto",
+
+  "optimization_mode": "balanced",
+
+  "stages": {
+    "strategy_optimization": true,
+    "risk_management": true,
+    "bollinger": true
+  }
+}

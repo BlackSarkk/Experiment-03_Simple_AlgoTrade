@@ -16,9 +16,9 @@ Python is the source of truth; a TradingView Pine port mirrors it for chart vali
 
 | Preset | Pine | What it is |
 |---|---|---|
-| `configs/config1-ETHUSDTP15m-long.json` | `pine/config1-ETHUSDTP15m-long.pine` | **Frozen baseline** — Candidate #158, Bollinger OFF |
-| `configs/config2-ETHUSDTP15m-long.json` | `pine/config2-ETHUSDTP15m-long.pine` | Same Candidate #158 values, Bollinger ON |
-| `configs/default.json` | — | shared-risk-policy baseline preset |
+| `configs/config/config1-ETHUSDTP15m-long.json` | `pine/config1-ETHUSDTP15m-long.pine` | **Frozen baseline** — Candidate #158, Bollinger OFF |
+| `configs/config/config2-ETHUSDTP15m-long.json` | `pine/config2-ETHUSDTP15m-long.pine` | Same Candidate #158 values, Bollinger ON |
+| `configs/config/default.json` | — | shared-risk-policy baseline preset |
 
 There is no Config3. A Multi-Timeframe (2h EMA300) gate was trialled as Config2/Config3 and
 **rejected**; its Python filter, configs and Pine block have been removed. See
@@ -39,6 +39,17 @@ UNSEEN reference (2025-12-01 → 2026-08-15, $10,000 start):
 | Config1 (Bollinger OFF) | +38.57% | 1.257 | 29.67% | 73 |
 | **Config2** (Bollinger ON) | +80.50% | 1.681 | 16.33% | 53 |
 
+## Config layout
+
+```
+configs/
+├── config/     runnable strategy configs (and optimizer output)
+└── optimize/   optimizer input presets
+```
+
+This is a hard rule — `configs/*.json` no longer resolves. Trading configs live in
+`configs/config/`, optimizer presets in `configs/optimize/`.
+
 ## Running it
 
 One generic interface — no aliases, no numbered presets:
@@ -50,7 +61,21 @@ One generic interface — no aliases, no numbered presets:
 ```
 
 `<config-file>` may be `config1-ETHUSDTP15m-long.json`,
-`configs/config1-ETHUSDTP15m-long.json`, or the bare name `config1-ETHUSDTP15m-long`.
+`configs/config/config1-ETHUSDTP15m-long.json`, or the bare name
+`config1-ETHUSDTP15m-long`.
+
+## Optimizing
+
+```bash
+./pipeline.sh --optimize --odefault.json --mywinner.json
+```
+
+Reads `configs/optimize/odefault.json`, writes `configs/config/mywinner.json`.
+Stage [1/6] (data preparation, 60/20/20 partitions, locked UNSEEN) is implemented;
+stages [2/6]-[6/6] are not, so no output config is written yet.
+The output name is mandatory, is never auto-generated, and an existing config is
+never overwritten. `--optimize` cannot be combined with any execution or
+maintenance action. See `WALKTHROUGH.md` § 15.
 
 ## Backups and reference code
 
@@ -91,4 +116,5 @@ against current Config1/Config2 results.
 1. This file.
 2. `WALKTHROUGH.md` — architecture, flows, commands.
 3. `TECH.md` — if you are (or are directing) an AI agent making changes.
-4. `configs/config1-ETHUSDTP15m-long.json` — the numbers that define current behaviour.
+4. `configs/config/config1-ETHUSDTP15m-long.json` — the numbers that define current behaviour.
+5. `configs/optimize/odefault.json` — the optimizer's human-facing inputs.

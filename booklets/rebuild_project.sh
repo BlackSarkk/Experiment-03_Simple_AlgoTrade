@@ -81,7 +81,7 @@ fi
   [[ -x .venv/bin/pip ]] && .venv/bin/pip freeze 2>/dev/null || echo "(venv pip unavailable)"
 } > "$PAYLOAD/ENVIRONMENT.txt"
 
-ACTIVE_CFG="configs/config1-ETHUSDTP15m-long.json"
+ACTIVE_CFG="configs/config/config1-ETHUSDTP15m-long.json"
 ACTIVE_PINE="pine/config1-ETHUSDTP15m-long.pine"
 {
   echo "REBUILD MANIFEST"

@@ -368,8 +368,8 @@ def main():
     parser.add_argument("--forward-test", action="store_true", default=False, help="Run paper forward test engine")
 
     # Config Preset
-    parser.add_argument("--config-preset", type=str, default="configs/default.json",
-                        help="Path to a config JSON (or a bare preset name resolved under configs/)")
+    parser.add_argument("--config-preset", type=str, default="configs/config/default.json",
+                        help="Path to a config JSON (or a bare preset name resolved under configs/config/)")
 
     # Reset & Cache Controls (Defaults MUST be False for safety!)
     parser.add_argument("--hard-reset", action="store_true", default=False, help="Complete destruction of all generated files")
@@ -395,8 +395,8 @@ def main():
     _raw = args.config_preset
     config_path = None
     for cand in (_raw, f"{_raw}.json",
-                 os.path.join("configs", _raw),
-                 os.path.join("configs", f"{_raw}.json")):
+                 os.path.join("configs", "config", _raw),
+                 os.path.join("configs", "config", f"{_raw}.json")):
         if os.path.isfile(cand):
             config_path = cand
             break

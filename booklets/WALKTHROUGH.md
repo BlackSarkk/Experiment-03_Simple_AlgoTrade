@@ -9,10 +9,13 @@ and one execution engine, so results reconcile trade-for-trade.
 ## 1. Directory structure
 
 ```
-configs/          runnable presets (JSON)
-  default.json                    baseline preset, uses the shared risk policy
-  config1-ETHUSDTP15m-long.json   FROZEN Candidate #158, filters OFF
-  config2-ETHUSDTP15m-long.json   same Candidate #158 values, Bollinger ON
+configs/
+  config/       runnable strategy presets (JSON) + optimizer output
+    default.json                    baseline preset, uses the shared risk policy
+    config1-ETHUSDTP15m-long.json   FROZEN Candidate #158, filters OFF
+    config2-ETHUSDTP15m-long.json   same Candidate #158 values, Bollinger ON
+  optimize/     optimizer input presets
+    odefault.json                   human-facing optimizer inputs
 pine/
   config1/2-ETHUSDTP15m-long.pine     TradingView ports (both generated from tools/generate_pine.py;
                                       config1 is PROTECTED and never regenerated)
@@ -26,6 +29,9 @@ src/
   filters/      stage_1_bollinger/filter.py   Bollinger chop gate (the only signal filter)
                 masked_strategy.py            MaskedStrategy — generic precomputed-mask gate
   optimization/ multi_tf_optimizer.py, deep_15m_optimizer.py, fetch_data.py, backup/
+                (legacy, AI-operated; left untouched)
+  auto_optimise/ human-operable optimizer — cli.py, preset.py, history.py,
+                output_guard.py, trials.py, runplan.py, ui.py
 tests/          unit / integration / parity / regression
 tools/          generate_pine.py
 data/           cached OHLCV CSV (regenerated on demand)
@@ -62,14 +68,16 @@ Every run takes `--config <config-file>` plus one action:
 ```
 
 **Config resolution** — the argument is tried in this order, first hit wins:
-`<arg>` → `<arg>.json` → `configs/<arg>` → `configs/<arg>.json`.
+`<arg>` → `<arg>.json` → `configs/config/<arg>` → `configs/config/<arg>.json`.
 So all of these are equivalent:
 
 ```bash
-./pipeline.sh --config config1-ETHUSDTP15m-long.json      --backtest
-./pipeline.sh --config configs/config1-ETHUSDTP15m-long.json --backtest
-./pipeline.sh --config config1-ETHUSDTP15m-long           --backtest
+./pipeline.sh --config config1-ETHUSDTP15m-long.json             --backtest
+./pipeline.sh --config configs/config/config1-ETHUSDTP15m-long.json --backtest
+./pipeline.sh --config config1-ETHUSDTP15m-long                  --backtest
 ```
+
+The old flat `configs/<name>.json` location is gone; it no longer resolves.
 
 `--config=<file>` also works. There are no `--config1`/`--config2` aliases and no
 `--default` shortcut — pass the filename.
@@ -98,7 +106,7 @@ Other flags: `--resume`, `--clear-cache-only`. `--historical-replay` selects
 
 ## 3. `default.json` vs the frozen config
 
-| | `default.json` | `config1-ETHUSDTP15m-long.json` |
+| | `config/default.json` | `config/config1-ETHUSDTP15m-long.json` |
 |---|---|---|
 | Purpose | baseline / regression reference | frozen Candidate #158 |
 | Risk source | `src/risk_management/riskmanager.json` (authoritative) | **its own `risk` block** (`"_risk_policy": "preset"`) |
@@ -273,3 +281,107 @@ quantity step 0.001, tick size 0.01, commission 0.05%, slippage 1 tick.
 
 Reference (current engine, 2024-01-01 → 2026-08-15): **+274.67%**, 262 trades.
 2026 YTD (2026-01-01 → 2026-08-15): **+24.69%**, PF 1.205, DD 29.68%, 64 trades.
+
+
+---
+
+## 15. Auto-optimizer (`src/auto_optimise/`)
+
+Human-operable optimizer. Orchestration only — every trial runs the production
+`BacktestEngine` / `BaselineStrategy` / `BaselineRiskManager` unchanged.
+
+```bash
+./pipeline.sh --optimize --odefault.json --mywinner.json
+```
+
+This is the only optimizer syntax: preset first, output second, both as
+`--<name>.json`.
+
+`<preset>` resolves under `configs/optimize/`; `<output>` is created in
+`configs/config/`. The output name is **mandatory**, is never auto-generated, and
+an existing strategy config is **never** overwritten — existing configs are
+recorded experiments. Names must be plain `.json` file names: no subdirectories,
+no `..`, no absolute paths.
+
+`--optimize` is mutually exclusive with `--backtest`, `--forward-test`,
+`--historical-replay`, `--robustness`, `--config` and every maintenance flag, in
+either order on the command line.
+
+### Preset (`configs/optimize/odefault.json`)
+
+Only human-facing inputs. Search ranges, objective weights, Optuna internals,
+warmup, partition ratios, seeds and storage paths stay automatic.
+
+| Field | Meaning |
+|---|---|
+| `platform`, `symbol`, `timeframe` | what to optimize on (`1m…4h`) |
+| `history.days` **or** `history.start_date`+`end_date` | mutually exclusive; one is required |
+| `initial_balance` | starting equity |
+| `direction.long_enabled` / `short_enabled` | at least one must be true |
+| `trials` | `"auto"` or a whole number |
+| `optimization_mode` | `balanced` / `conservative` / `aggressive` |
+| `stages.{strategy_optimization,risk_management,bollinger}` | per-stage on/off |
+
+**Direction semantics.** `StrategyConfig` holds one shared parameter set, so both
+directions use the same indicator values. With LONG and SHORT both enabled the
+optimizer runs **one mixed campaign** — one backtest per trial with both sides
+active and one combined score, not two separate campaigns. Independent per-side
+parameters would need a new `DualSideStrategy`; that is deliberately not faked.
+
+**Trials.** `"auto"` resolves by timeframe and sizes the **Phase-A strategy search
+only**; the risk and Bollinger stages derive their own smaller budgets. The
+mapping and its rationale live in `src/auto_optimise/trials.py` and is currently
+provisional pending a timed measurement.
+
+### Campaign stages
+
+```
+[1/6] Data preparation
+[2/6] Strategy optimization           (neutral risk: leverage 1.0, fixed risk/allocation)
+[3/6] Strategy robustness / validation
+[4/6] Risk optimization               (leverage, risk_per_trade_pct, max_position_allocation_pct)
+[5/6] Bollinger optimization          (length, std, min_bandwidth_pct,
+                                       expansion_lookback, expansion_min_ratio, min_mid_distance)
+[6/6] Final Top-10 + UNSEEN confirmation
+```
+
+Disabled stages print as `SKIPPED` and are excluded from ETA estimation.
+Partitioning is fixed policy: chronological **TRAIN 60 / VALID 20 / UNSEEN 20** by
+calendar date, plus a separate warmup block before TRAIN. Ranking uses TRAIN +
+VALIDATION only; UNSEEN unlocks once after the Top-10 is frozen and never
+reorders it.
+
+### Stage [1/6] — Data preparation (implemented)
+
+```
+resolve history -> load/download -> compute indicators on the FULL warmup+window
+frame -> slice the evaluation window -> split 60/20/20 -> expose TRAIN + VALIDATION,
+seal UNSEEN
+```
+
+Indicators are computed **before** any slice is taken, so no rolling window ever
+restarts at a partition boundary. The warmup lead-in is 1000 candles
+(`src/auto_optimise/lookback.py`: largest supported lookback 200 x 5 safety, floor
+500) and is trimmed to exactly that size so results do not depend on how wide the
+data cache happens to be. The still-forming candle is dropped — its close and
+volume mutate on every fetch. Warmup candles belong to no partition and can never
+trade.
+
+Assertions run every time and raise rather than warn: partition counts must sum to
+the evaluation window, partitions must not overlap, concatenating them must
+reproduce the window exactly (no gaps), and the first TRAIN and VALIDATION candles
+must carry real indicator history — a restarted EMA equals its first close, so that
+equality is treated as a failure.
+
+`UnseenVault` (`src/auto_optimise/unseen.py`) is a structural barrier, not a
+convention: the frame lives in a closure with no attribute holding it, the object
+has `__slots__` and no `__dict__`, and pickling, copying and iteration all raise.
+`get()` raises `UnseenLockedError` until a final-selection stage calls
+`unlock(reason)`, which is one-way and recorded. Row count and date bounds stay
+readable while locked so the run plan can report them.
+
+### Current status
+
+Stage 1 runs. Stages 2-6 print `NOT IMPLEMENTED`. No Optuna search, ranking, risk
+stage, Bollinger stage or UNSEEN unlocking exists yet, and no output config is
+written because no winner exists.

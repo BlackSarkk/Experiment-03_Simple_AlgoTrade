@@ -11,11 +11,12 @@ No secrets, credentials or machine-specific data are recorded here.
 |---|---|
 | Symbol | `ETHUSDT` (Binance USD-M perpetual; TradingView `BINANCE:ETHUSDT.P`) |
 | Timeframe | `15m` |
-| Frozen baseline config | `configs/config1-ETHUSDTP15m-long.json` (Bollinger OFF) |
+| Frozen baseline config | `configs/config/config1-ETHUSDTP15m-long.json` (Bollinger OFF) |
 | Filtered variant | `config2-…` (Bollinger ON; identical in every other value) |
 | Pine ports | `pine/config1/2-ETHUSDTP15m-long.pine` (both from `tools/generate_pine.py`; config1 PROTECTED) |
 | Direction | `long_enabled: true`, `short_enabled: false` |
 | Active risk policy | `src/risk_management/riskmanager.json` |
+| Config layout | `configs/config/` = trading presets · `configs/optimize/` = optimizer presets |
 | RiskManager code | `src/risk_management/baseline.py` (`BaselineRiskManager`) |
 | Initial capital | 10,000 |
 | Commission | 0.05% taker, charged on entry and exit notional |
@@ -52,7 +53,9 @@ inclusive end-of-day). Warmup candles seed indicators and can never trade.
 ```
 pipeline.sh
  ├─ parse flags; --config <file> → CONFIG_ARG
- ├─ resolve CONFIG_ARG → CONFIG_PATH  (<arg> | <arg>.json | configs/<arg> | configs/<arg>.json)
+ ├─ --optimize → exec src/auto_optimise/cli.py (exclusive; conflicts rejected first)
+ ├─ resolve CONFIG_ARG → CONFIG_PATH
+ │    (<arg> | <arg>.json | configs/config/<arg> | configs/config/<arg>.json)
  ├─ validate: file exists → JSON parses → required schema present (else error + exit 1)
  └─ build CMD → .venv/bin/python3 src/main.py --config-preset "$CONFIG_PATH" …
 
@@ -89,7 +92,7 @@ engine or strategy source.
 
 1. **Preset-owned risk** — if the preset contains `"_risk_policy": "preset"`, its `risk`
    block is used verbatim and `riskmanager.json` is bypassed entirely.
-   (`config1-ETHUSDTP15m-long.json` sets this.)
+   (`config/config1-ETHUSDTP15m-long.json` sets this.)
 2. Otherwise **`src/risk_management/riskmanager.json`** overrides the preset's `risk`
    block field-by-field, and overridden keys are printed at startup.
 3. Otherwise the preset's own `risk` block.
@@ -131,13 +134,14 @@ differs slightly from Binance REST klines.
 ## 5. Safe modification rules
 
 **May be edited for strategy research** (prefer subclassing over editing):
-`src/filters/**`, `tools/generate_pine.py`, `tests/**`, `booklets/**`, new files.
+`src/filters/**`, `src/auto_optimise/**`, `tools/generate_pine.py`, `tests/**`,
+`booklets/**`, new files.
 
 **Do not change casually** (any edit invalidates every recorded result):
 `src/strategy/baseline_strategy.py`, `src/strategy/indicators.py`,
 `src/risk_management/baseline.py`, `src/backtest/engine.py`,
 `src/common/accounting.py`, `src/forward_test/replay_engine.py`,
-`configs/config1-ETHUSDTP15m-long.json`, `pine/config1-ETHUSDTP15m-long.pine`.
+`configs/config/config1-ETHUSDTP15m-long.json`, `pine/config1-ETHUSDTP15m-long.pine`.
 
 **Never touch:** `src/risk_management/backup/**`, `src/optimization/backup/**`
 (historical reference; never imported by production — verify with
@@ -162,7 +166,7 @@ shared `TEMPLATE`; the only difference it injects is `filters.bollinger.enabled`
 contains **only** `config1-…​.pine` (the frozen baseline), so config1 is never overwritten
 while config2 regenerates idempotently. Verify with a diff before and after if in doubt.
 
-**Adding a config:** drop a new JSON into `configs/` with the full schema
+**Adding a config:** drop a new JSON into `configs/config/` with the full schema
 (`platform, symbol, timeframe, strategy, risk, execution, filters`) and add
 `"_risk_policy": "preset"` if it owns its risk block. **No `pipeline.sh` change is
 needed** — there are no aliases or filename mappings. Run it with
@@ -188,6 +192,10 @@ bash -n pipeline.sh
 
 # 3 baseline reproduction — MUST match before any optimization
 #    2024-01-01..2026-08-15 → +274.67%, 262 trades
+
+# 4b optimizer shell (fast, no trading)
+./pipeline.sh --optimize --odefault.json --a-name-that-does-not-exist.json
+#    prints the run plan, exits 0, creates nothing
 
 # 4 backtest ↔ replay parity
 ./pipeline.sh --config config1-ETHUSDTP15m-long.json --historical-replay
@@ -226,6 +234,16 @@ Running `tests/unit` triggers a 3h market-data download; delete
 | `forward_test/paper_engine.py` | `PaperForwardEngine` |
 | `filters/stage_1_bollinger/filter.py` | `BollingerFilterConfig`, `compute_bollinger`, `allow_mask`, `BollingerFilteredStrategy` |
 | `filters/masked_strategy.py` | `MaskedStrategy` — generic precomputed-mask gate, filter-agnostic |
+| `auto_optimise/cli.py` | optimizer entry point: parse → validate → run plan |
+| `auto_optimise/preset.py` | `OptimizerPreset`, schema validation for `configs/optimize/*.json` |
+| `auto_optimise/history.py` | `History` — days ⊻ (start_date+end_date) resolution |
+| `auto_optimise/output_guard.py` | mandatory, non-overwriting, non-escaping output name |
+| `auto_optimise/trials.py` | `"auto"` → per-timeframe **Phase-A** trial budget |
+| `auto_optimise/dataprep.py` | stage [1/6]: load → indicators → slice → 60/20/20 partitions |
+| `auto_optimise/unseen.py` | `UnseenVault` — structural one-way UNSEEN barrier |
+| `auto_optimise/lookback.py` | warmup sizing from the widest supported lookbacks |
+| `auto_optimise/runplan.py` | 6-stage run plan rendering |
+| `auto_optimise/ui.py` | colour helpers; degrades without a TTY, never affects results |
 
 **Preset schema**
 ```json
@@ -287,3 +305,86 @@ missing file → 1 (lists available configs); malformed JSON → 1; schema-inval
 4. `pine/config1-ETHUSDTP15m-long.pine` line 5 names its source as
    `configs/config1-ETHUSDTP15m.json` (missing `-long`). Cosmetic comment typo only; the
    file is PROTECTED and was deliberately left untouched.
+
+
+---
+
+## 9. Auto-optimizer contract (`src/auto_optimise/`)
+
+**Hard boundary.** This package is orchestration only. It may construct configs and
+call `BacktestEngine`, but it must never modify `baseline_strategy.py`,
+`indicators.py`, `baseline.py`, `engine.py`, `accounting.py`, the Bollinger
+mathematics, or any Pine file. UI code (`ui.py`, future dashboard) must never be
+able to change a trial, a score or a result — a UI failure may degrade the display
+and nothing else.
+
+**CLI**
+```
+./pipeline.sh --optimize --<preset>.json --<output>.json
+```
+Preset first, output second. This is the only accepted form.
+`pipeline.sh` rejects `--optimize` combined with `--backtest`, `--forward-test`,
+`--historical-replay`, `--robustness`, `--config`, `--reset`, `--hard-reset`,
+`--clear-cache`, `--clear-cache-only` or `--resume`, in either order, exit 1.
+Then it `exec`s `src/auto_optimise/cli.py` with the remaining arguments.
+
+**Output guard** (`output_guard.validate`): name mandatory · plain file name only
+(no `/`, `\`, `..`, `~`, absolute paths) · charset `[A-Za-z0-9._-]` · must end
+`.json` · must not already exist · realpath must resolve
+directly inside `configs/config/`. Every failure exits 1.
+
+**Preset validation** (`preset.load`): all nine top-level fields required ·
+platform in `BINANCE_FUTURES` · timeframe in `1m,3m,5m,15m,30m,1h,2h,3h,4h` ·
+`initial_balance ≥ 100` · at least one direction true · at least one stage true ·
+`trials` is `"auto"` or an int in `[10, 100000]` · mode in
+`balanced,conservative,aggressive` · unknown keys in `history` and `stages`
+rejected.
+
+**History** (`history.resolve`): `days` and `start_date`/`end_date` are mutually
+exclusive and one is required. `days ∈ [30, 3650]`. Explicit ranges need both
+endpoints, `YYYY-MM-DD`, `end > start`, span ≥ 30 days. Relative mode is resolved
+to concrete dates later, once the data layer reports the latest available candle.
+
+**Stage [1/6] — data preparation (implemented).** `dataprep.prepare(preset)` returns
+`PreparedData`. Order is mandatory: load a frame covering warmup + the requested
+window, `compute_all_indicators` ONCE on all of it, then slice. Warmup is trimmed
+to exactly `lookback.required_warmup_candles()` (1000) so cache width cannot change
+results, and the still-forming candle is dropped so re-fetches cannot. The
+evaluation window is split chronologically 60/20/20 by calendar time; warmup is not
+part of the split. Every run asserts count conservation, non-overlap, gap-free
+reconstruction, and real indicator context at the first TRAIN and VALIDATION candle.
+Violations raise `AssertionError` — they mean results would be silently wrong.
+
+**UNSEEN barrier.** `UnseenVault` holds the partition in a closure; there is no
+attribute to read, `__slots__` prevents `__dict__`, and `__reduce__`/`__iter__`
+raise. `get()` raises `UnseenLockedError` until `unlock(reason)` — one-way, recorded,
+and reserved for the final-selection stage. No search, robustness, risk, filter or
+ranking code may call it.
+
+**Cache caveat.** The market-data cache is shared across history windows. Alternating
+between different requested ranges can force a refetch, so a checksum is stable for a
+settled cache and a fixed window, not across window changes.
+
+**Planned phases** (not implemented):
+- **A — strategy**: search the shared `StrategyConfig` fields under a neutral risk
+  policy (leverage 1.0, fixed risk/allocation) so ranking is sizing-neutral.
+- **B — risk**: strategy frozen; search `leverage`, `risk_per_trade_pct`,
+  `max_position_allocation_pct` only. Sizing formulas, margin semantics, quantity
+  rounding, invalid-SL rules, tick handling and execution stay frozen. Scored on
+  return/PF/DD/Sharpe/fees/margin safety together — never lowest-DD or
+  highest-leverage alone. B2 perturbs the best regions and discards anything that
+  collapses under a small change.
+- **C — Bollinger**: strategy and risk frozen; search the six
+  `BollingerFilterConfig` fields, compared FILTER OFF vs ON on TRAIN+VALIDATION.
+  Settings that merely delete almost every trade are rejected; if the filter does
+  not convincingly improve the system the winner may ship with it disabled.
+- **Final**: Top-10 built on TRAIN+VALIDATION only, then UNSEEN unlocked once and
+  each candidate flagged `CONFIRMED` / `DEGRADED` / `FAILED`. UNSEEN never
+  reorders the Top-10 and never triggers retuning. The emitted config is the
+  preselected #1 with its UNSEEN status in metadata.
+
+**Known deviation from the current legacy optimizers:** both
+`src/optimization/deep_15m_optimizer.py` and `multi_tf_optimizer.py` slice first
+and then call `compute_all_indicators` on the slice, restarting every rolling
+window at the partition edge. `auto_optimise` must compute indicators on the full
+warmup+partitions frame per trial and slice by index, matching `main.py`.
