@@ -117,21 +117,80 @@ def print_effective_strategy_configuration(cfg: PipelineConfig):
     print("=" * 80 + "\n")
 
 
-def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False):
-    if clear_cache_only:
-        data_loader = MarketDataLoader(data_dir=cfg.data_dir)
-        data_loader.clear_market_cache(cfg.platform)
-        logger.info("[+] Market cache cleared. Exiting immediately (--clear-cache-only).")
-        sys.exit(0)
+def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False, maintenance_only: bool = False):
 
     print_banner(cfg)
     print_effective_strategy_configuration(cfg)
     print_run_configuration_panel(cfg)
 
+    # Handle RESET / HARD_RESET if requested
+    if cfg.hard_reset:
+        print("\n" + "=" * 70)
+        print("                  HARD_RESET: deleting all generated cache, results, logs, runtime state, archives, and optimization outputs.")
+        print("=" * 70)
+        import glob
+        
+        results_cleared = 0
+        for root, dirs, files in os.walk(cfg.results_dir):
+            for f in files:
+                if f.endswith((".csv", ".json", ".log", ".txt", ".md")):
+                    os.remove(os.path.join(root, f))
+                    results_cleared += 1
+                    
+        logs_cleared = 0
+        for root, dirs, files in os.walk(cfg.logs_dir):
+            for f in files:
+                if f.endswith((".log", ".json", ".txt", ".md")):
+                    os.remove(os.path.join(root, f))
+                    logs_cleared += 1
+                    
+        print(f"  [-] Removed {results_cleared} generated files in results/")
+        print(f"  [-] Removed {logs_cleared} generated files in logs/")
+        print("  [+] Preserved configs/, src/, tests/")
+        print("======================================================================\n")
+    elif cfg.reset:
+        print("\n" + "=" * 70)
+        print("                  RESET=true RUN ARTIFACT CLEANUP")
+        print("=" * 70)
+        import glob
+        
+        files_to_delete = [
+            os.path.join(cfg.logs_dir, "forward_state.json"),
+            os.path.join(cfg.logs_dir, "replay_state.json"),
+            os.path.join(cfg.results_dir, "forward", "trades.csv"),
+            os.path.join(cfg.results_dir, "forward", "events.csv"),
+            os.path.join(cfg.results_dir, "forward", "equity_curve.csv"),
+            os.path.join(cfg.results_dir, "replay", "trades.csv"),
+            os.path.join(cfg.results_dir, "replay", "events.csv"),
+            os.path.join(cfg.results_dir, "replay", "equity_curve.csv"),
+            os.path.join(cfg.results_dir, "backtest", "trades.csv"),
+            os.path.join(cfg.results_dir, "backtest", "events.csv"),
+            os.path.join(cfg.results_dir, "backtest", "equity_curve.csv"),
+        ]
+        
+        for f in glob.glob(os.path.join(cfg.logs_dir, "session_*.log")):
+            files_to_delete.append(f)
+            
+        deleted = 0
+        for f in files_to_delete:
+            if os.path.exists(f):
+                os.remove(f)
+                deleted += 1
+                
+        print(f"  [-] Removed {deleted} generated current runtime/log files")
+        print("  [+] Preserved historical archives, optimization results, tracker data")
+        print("  [+] Preserved market-data cache")
+        print("  [+] Preserved configs/, src/, tests/")
+        print("======================================================================\n")
+
     # Handle CLEAR_CACHE if requested
     data_loader = MarketDataLoader(data_dir=cfg.data_dir)
-    if cfg.clear_cache or cfg.reset_cache:
-        data_loader.clear_market_cache(cfg.platform)
+    if cfg.clear_cache or cfg.reset_cache or clear_cache_only:
+        data_loader.clear_market_cache(cfg.platform, hard_reset=cfg.hard_reset)
+
+    if maintenance_only or clear_cache_only:
+        logger.info("[+] Maintenance tasks completed. Exiting immediately.")
+        sys.exit(0)
 
     # 1. Market Data Loading
     df_raw = data_loader.load_ohlcv(cfg.platform, reset_cache=cfg.clear_cache)
@@ -170,9 +229,15 @@ def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False):
 
     # 5. Forward Testing (Paper Mode)
     if cfg.run_forward_test:
-        logger.info(f"Executing Paper Forward Testing Engine (Mode: {cfg.forward_mode})...")
-        forward_engine = PaperForwardEngine(cfg)
-        forward_engine.run_forward_session()
+        if cfg.forward_mode == "HISTORICAL_REPLAY":
+            from forward_test.replay_engine import HistoricalReplayEngine
+            logger.info(f"Executing Historical Replay Forward Engine (Mode: {cfg.forward_mode})...")
+            forward_engine = HistoricalReplayEngine(cfg, df_raw)
+            forward_engine.run_replay()
+        else:
+            logger.info(f"Executing Paper Forward Testing Engine (Mode: {cfg.forward_mode})...")
+            forward_engine = PaperForwardEngine(cfg)
+            forward_engine.run_forward_session()
 
 
 def main():
@@ -187,9 +252,11 @@ def main():
     parser.add_argument("--config-preset", type=str, default="default", help="Config preset name")
 
     # Reset & Cache Controls (Defaults MUST be False for safety!)
+    parser.add_argument("--hard-reset", action="store_true", default=False, help="Complete destruction of all generated files")
     parser.add_argument("--reset", action="store_true", default=False, help="Stage-scoped reset")
     parser.add_argument("--clear-cache", action="store_true", default=False, help="Delete market data cache and run stage")
     parser.add_argument("--clear-cache-only", action="store_true", default=False, help="Delete market data cache and exit immediately")
+    parser.add_argument("--maintenance-only", action="store_true", default=False, help="Perform maintenance tasks (reset/clear-cache) and exit immediately")
     parser.add_argument("--reset-cache", action="store_true", default=False, help="Alias for --clear-cache")
     parser.add_argument("--reset-forward-state", action="store_true", default=False, help="Reset forward paper state")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume existing forward paper state")
@@ -249,6 +316,7 @@ def main():
     cfg.execution.maker_fee_pct = e_data.get("maker_fee_pct", 0.02) / 100.0
     cfg.execution.slippage_pct = e_data.get("slippage_pct", 0.03) / 100.0
     cfg.execution.slippage_ticks = e_data.get("slippage_ticks", 1.0)
+    cfg.execution.tick_size = e_data.get("tick_size", 0.01)
 
     # Startup display
     print("============================================================")
@@ -263,9 +331,10 @@ def main():
         cfg.run_forward_test = True
         cfg.run_backtest = False
         cfg.run_robustness = False
-        cfg.platform.start_date = None
-        cfg.platform.end_date = None
-        cfg.platform.days = 60
+        if args.forward_mode != "HISTORICAL_REPLAY":
+            cfg.platform.start_date = None
+            cfg.platform.end_date = None
+            cfg.platform.days = 60
     elif args.robustness:
         cfg.run_robustness = True
         cfg.run_backtest = False
@@ -276,19 +345,20 @@ def main():
         cfg.run_forward_test = False
 
     cfg.execution_mode = args.execution_mode
+    cfg.hard_reset = args.hard_reset
     cfg.reset = args.reset
-    cfg.clear_cache = args.clear_cache or args.reset_cache or args.clear_cache_only
+    cfg.clear_cache = args.clear_cache or args.reset_cache or args.clear_cache_only or args.hard_reset
     cfg.reset_cache = cfg.clear_cache
     cfg.reset_forward_state = args.reset_forward_state or args.reset
     cfg.resume_forward_state = args.resume and not args.reset
     
-    if not cfg.run_forward_test:
-        cfg.platform.start_date = "2024-01-01"
-        cfg.platform.end_date = "2026-08-13"
+    if not cfg.run_forward_test or args.forward_mode == "HISTORICAL_REPLAY":
+        cfg.platform.start_date = preset_data.get("start_date", "2024-01-01")
+        cfg.platform.end_date = preset_data.get("end_date", "2026-08-15")
 
     cfg.forward_mode = args.forward_mode
     
-    run_pipeline(cfg, clear_cache_only=args.clear_cache_only)
+    run_pipeline(cfg, clear_cache_only=args.clear_cache_only, maintenance_only=args.maintenance_only)
 
 
 if __name__ == "__main__":

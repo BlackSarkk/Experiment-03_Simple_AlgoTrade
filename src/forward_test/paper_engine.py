@@ -359,7 +359,7 @@ class PaperForwardEngine:
         exit_triggered = False
         exit_reason = None
         exit_price = None
-        slippage = self.config.execution.slippage_ticks * 0.1
+        slippage = self.config.execution.slippage_ticks * self.config.execution.tick_size
 
         if side == "LONG":
             if current_price <= sl:
@@ -408,7 +408,7 @@ class PaperForwardEngine:
             entry_fee=pos["entry_fee"],
             exit_fee=exit_fee
         )
-        total_slip = (self.config.execution.slippage_ticks * 0.1) * 2.0 * size
+        total_slip = (self.config.execution.slippage_ticks * self.config.execution.tick_size) * 2.0 * size
 
         bal_before = self.account.balance
         AccountingEngine.update_account_on_trade_close(self.account, net_pnl, total_fees, total_slip)
@@ -492,16 +492,16 @@ class PaperForwardEngine:
                 sl_hit = c_low <= sl
                 tp_hit = c_high >= tp
                 if sl_hit:
-                    hit, reason, exit_p = True, "SL", min(c_open, sl) - (self.config.execution.slippage_ticks * 0.1)
+                    hit, reason, exit_p = True, "SL", min(c_open, sl) - (self.config.execution.slippage_ticks * self.config.execution.tick_size)
                 elif tp_hit:
-                    hit, reason, exit_p = True, "TP", max(c_open, tp) - (self.config.execution.slippage_ticks * 0.1)
+                    hit, reason, exit_p = True, "TP", max(c_open, tp) - (self.config.execution.slippage_ticks * self.config.execution.tick_size)
             elif side == "SHORT":
                 sl_hit = c_high >= sl
                 tp_hit = c_low <= tp
                 if sl_hit:
-                    hit, reason, exit_p = True, "SL", max(c_open, sl) + (self.config.execution.slippage_ticks * 0.1)
+                    hit, reason, exit_p = True, "SL", max(c_open, sl) + (self.config.execution.slippage_ticks * self.config.execution.tick_size)
                 elif tp_hit:
-                    hit, reason, exit_p = True, "TP", min(c_open, tp) + (self.config.execution.slippage_ticks * 0.1)
+                    hit, reason, exit_p = True, "TP", min(c_open, tp) + (self.config.execution.slippage_ticks * self.config.execution.tick_size)
 
             if hit and exit_p is not None:
                 self.log_event("OUTAGE_EXIT_RECONSTRUCTED", f"Detected offline {reason} hit during outage at {dt_str} @ ${exit_p:.2f}")
@@ -574,7 +574,7 @@ class PaperForwardEngine:
 
         if self.active_position is None and (is_long or is_short):
             c_open = self.feed.current_price or sig.close_price
-            realized_entry = c_open + (self.config.execution.slippage_ticks * 0.1 if sig.signal_type == "LONG" else -self.config.execution.slippage_ticks * 0.1)
+            realized_entry = c_open + (self.config.execution.slippage_ticks * self.config.execution.tick_size if sig.signal_type == "LONG" else -self.config.execution.slippage_ticks * self.config.execution.tick_size)
 
             sizing = self.risk_manager.calculate_position(
                 equity=self.account.balance,
@@ -611,6 +611,8 @@ class PaperForwardEngine:
                 self.last_executed_signal_ts = sig_ts
                 self.log_event("PAPER_ENTRY", f"Opened Paper {sig.signal_type} @ ${realized_entry:.2f} (Size: {sizing.position_size:.4f} ETH | SL: ${sizing.sl_price:.2f} | TP: ${sizing.tp_price:.2f})")
                 self.save_state(realized_entry)
+            else:
+                logger.warning(f"Sizing rejected! Valid={sizing.is_valid}, Size={sizing.position_size}, Reason={sizing.reason}")
 
     def update_global_tracker(self):
         """Append or update FORWARD_PAPER session metrics row in results/tracker.csv."""
@@ -648,10 +650,10 @@ class PaperForwardEngine:
             "gross_loss": round(g_loss, 2),
             "max_drawdown_pct": round(self.max_dd_pct, 2),
             "max_drawdown_dollars": round(self.peak_equity * (self.max_dd_pct / 100.0), 2),
-            "sharpe_ratio": 1.21,
-            "sortino_ratio": 0.91,
+            "sharpe_ratio": None,
+            "sortino_ratio": None,
             "avg_trade_pnl": round((self.account.balance - self.account.initial_balance) / max(len(self.trades_history), 1), 2),
-            "expectancy": 0.0,
+            "expectancy": None,
             "total_fees": round(self.total_fees, 2),
             "total_slippage": round(self.total_slippage, 2),
             "long_return_dollars": round(sum(t["net_pnl"] for t in self.trades_history if t["side"] == "LONG"), 2),
@@ -788,7 +790,7 @@ class PaperForwardEngine:
         wr = (wins / len(self.trades_history) * 100.0) if self.trades_history else 0.0
         g_prof = sum(t.get("gross_pnl", 0.0) for t in self.trades_history if t.get("gross_pnl", 0.0) > 0)
         g_loss = abs(sum(t.get("gross_pnl", 0.0) for t in self.trades_history if t.get("gross_pnl", 0.0) < 0))
-        g_pf = (g_prof / g_loss) if g_loss > 0 else (1.42 if not self.trades_history else (99.0 if g_prof > 0 else 0.0))
+        g_pf = (g_prof / g_loss) if g_loss > 0 else (0.0 if not self.trades_history else (99.0 if g_prof > 0 else 0.0))
 
         # Format 3 most recent completed trades for Recent Trade History panel
         recent_trades_formatted = []
@@ -1168,7 +1170,7 @@ class PaperForwardEngine:
             "performance": {
                 "win_rate_pct": wr,
                 "profit_factor": g_pf,
-                "sharpe_ratio": 1.21,
+                "sharpe_ratio": None,
                 "max_drawdown_pct": self.max_dd_pct,
                 "leverage": self.config.risk.leverage,
                 "exposure_pct": exposure_pct

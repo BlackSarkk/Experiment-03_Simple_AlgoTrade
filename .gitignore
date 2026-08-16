@@ -136,3 +136,12 @@ src/optimization/fixed_15m_test.py
 src/optimization/run_1m_experiments.py
 src/optimization/run_3m_experiments.py
 src/optimization/fix_regimes.py
+tests/ 
+
+
+
+
+
+
+
+docs/parity/

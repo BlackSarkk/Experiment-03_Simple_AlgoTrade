@@ -306,9 +306,10 @@ class PaperDashboard:
 
         perf_table.add_row("Win Rate", f"{perf.get('win_rate_pct', 0.0):.2f}%")
         perf_table.add_row("Profit Factor", f"{perf.get('profit_factor', 0.0):.2f}")
-        perf_table.add_row("Sharpe Ratio", f"{perf.get('sharpe_ratio', 1.21):.2f}")
+        sharpe_val = perf.get('sharpe_ratio')
+        perf_table.add_row("Sharpe Ratio", f"{sharpe_val:.2f}" if sharpe_val is not None else "N/A")
         perf_table.add_row("Max Drawdown", f"{perf.get('max_drawdown_pct', 0.0):.2f}%")
-        perf_table.add_row("Current Leverage", f"{perf.get('leverage', 3.5):.1f}x")
+        perf_table.add_row("Current Leverage", f"{perf.get('leverage', 1.0):.1f}x")
         perf_table.add_row("Current Exposure", f"{perf.get('exposure_pct', 0.0):.1f}%")
 
         perf_panel = Panel(perf_table, title="[bold blue]Performance[/bold blue]", border_style="blue", expand=True)

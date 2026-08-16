@@ -37,10 +37,13 @@ class MarketDataLoader:
         safe_symbol = symbol.replace("/", "_").replace("-", "_")
         return os.path.join(self.data_dir, f"candles_futures_{platform.lower()}_{safe_symbol}_{resolution}.csv")
 
-    def clear_market_cache(self, cfg: PlatformConfig) -> List[str]:
-        """Delete ONLY generated/downloaded market-data cache files in data_dir matching symbol/platform."""
-        safe_symbol = cfg.symbol.replace("/", "_").replace("-", "_")
-        pattern = os.path.join(self.data_dir, f"candles_*{safe_symbol}*.csv")
+    def clear_market_cache(self, cfg: PlatformConfig, hard_reset: bool = False) -> List[str]:
+        """Delete ONLY generated/downloaded market-data cache files in data_dir."""
+        if hard_reset:
+            pattern = os.path.join(self.data_dir, "candles_*.csv")
+        else:
+            safe_symbol = cfg.symbol.replace("/", "_").replace("-", "_")
+            pattern = os.path.join(self.data_dir, f"candles_*{safe_symbol}*.csv")
         deleted_files = []
 
         files_to_delete = glob.glob(pattern)
@@ -96,10 +99,53 @@ class MarketDataLoader:
         if os.path.exists(cache_path):
             if not quiet:
                 logger.info(f"Loading cached market data from: {cache_path}")
-            df = pd.read_csv(cache_path)
-            if "datetime" in df.columns:
-                df["datetime"] = pd.to_datetime(df["datetime"])
-            return self.validate_ohlcv(df, cfg.resolution, quiet=quiet)
+            
+            cache_valid = True
+            try:
+                df = pd.read_csv(cache_path)
+                if "datetime" in df.columns:
+                    df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+                else:
+                    raise KeyError("Missing 'datetime' column")
+                
+                # Cache coverage validation
+                if not df.empty:
+                    cache_start = df["datetime"].min()
+                    cache_end = df["datetime"].max()
+                    
+                    end_ts = int(time.time())
+                    if cfg.end_date:
+                        end_ts = parse_datetime_to_ts(cfg.end_date)
+                    req_end = pd.to_datetime(end_ts, unit='s', utc=True)
+                    
+                    if cfg.start_date:
+                        start_ts = parse_datetime_to_ts(cfg.start_date)
+                    elif cfg.days:
+                        fetch_days = 10 if (cfg.resolution == "1m" and cfg.days == 60) else cfg.days
+                        start_ts = end_ts - (fetch_days * 86400)
+                    else:
+                        start_ts = end_ts - (365 * 86400)
+                    req_start = pd.to_datetime(start_ts, unit='s', utc=True)
+                    
+                    # Account for timeframe boundary tolerance
+                    minutes = self.TIMEFRAME_MINUTES.get(cfg.resolution, 60)
+                    tf_tolerance = pd.Timedelta(minutes=minutes)
+                    
+                    end_leniency = pd.Timedelta(days=1) if not cfg.end_date else tf_tolerance
+                    if req_start < cache_start - pd.Timedelta(days=1) or req_end > cache_end + end_leniency:
+                        if not quiet:
+                            logger.warning(f"Cache range ({cache_start.date()} to {cache_end.date()}) does not cover requested range ({req_start.date()} to {req_end.date()}). Forcing re-fetch.")
+                        cache_valid = False
+                else:
+                    raise ValueError("Empty CSV file")
+            except Exception as e:
+                if not quiet:
+                    logger.warning(f"Invalid or corrupt cache detected ({str(e)}). Marking invalid and removing.")
+                cache_valid = False
+                os.remove(cache_path)
+
+            if cache_valid:
+                return self.validate_ohlcv(df, cfg.resolution, quiet=quiet)
 
         # Check if requested resolution needs resampling from 1h
         fetch_res = cfg.resolution

@@ -62,6 +62,7 @@ class ExecutionConfig:
     taker_fee_pct: float = 0.0005           # 0.05% Taker fee
     slippage_pct: float = 0.0003            # 0.03% Slippage for REALISTIC mode
     slippage_ticks: float = 1.0             # 1 tick (0.1 USDT on ETH) for REFERENCE mode
+    tick_size: float = 0.01                 # Instrument tick size (e.g., 0.01 for ETHUSDT)
     use_next_candle_open: bool = True       # Execute on next candle open
     same_bar_sl_priority: bool = True       # Stop loss takes precedence if both SL & TP hit on same bar
 
@@ -86,6 +87,7 @@ class PipelineConfig:
     forward_mode: str = "PAPER"             # "PAPER"
 
     # Reset & Cache Controls (Defaults must always be False for safety!)
+    hard_reset: bool = False                # Complete destruction of all generated files
     reset: bool = False                     # Stage-scoped reset
     clear_cache: bool = False               # Market data cache deletion ONLY
     reset_cache: bool = False               # Alias for clear_cache

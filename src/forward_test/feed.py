@@ -143,7 +143,9 @@ class LiveMarketFeed:
                 platform="BINANCE_FUTURES",
                 symbol=self.symbol,
                 resolution=self.resolution,
-                days=warmup_days
+                days=warmup_days,
+                start_date=None,
+                end_date=None
             )
             self.active_progress_task = {"stage": "Warming up market data (60 days)", "current": 0, "total": 100, "pct": 0.0, "elapsed": "0s", "eta": "0s", "speed": "0 batch/s"}
             self.df_3h = self.data_loader.load_ohlcv(cfg, quiet=True, progress_callback=self._progress_cb)

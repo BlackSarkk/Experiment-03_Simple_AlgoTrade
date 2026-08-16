@@ -1,10 +1,10 @@
 {
-  "_name": "Default Preset",
-  "_description": "Standard 1m baseline fallback configuration",
-  "_validation": "None",
+  "_name": "Validated ETHUSDT 15m Long Base",
+  "_description": "Pine-parity ETHUSDT 15m long-only base strategy; optional filters disabled",
+  "_validation": "2.5-year backtest: +-2.91%, PF 0.77, Max DD 5.96%, 58 trades",
   "symbol": "ETHUSDT",
   "platform": "BINANCE_FUTURES",
-  "timeframe": "1m",
+  "timeframe": "15m",
   "strategy": {
     "ema_period": 51,
     "rsi_period": 14,
@@ -17,17 +17,26 @@
     "volume_sma_period": 20,
     "volume_mult": 1.0,
     "long_enabled": true,
-    "short_enabled": true,
+    "short_enabled": false,
     "risk_reward_ratio": 1.5
+  },
+  "bollinger": {
+    "enabled": false,
+    "length": 34,
+    "std": 2.7,
+    "min_width": 1.4,
+    "max_width": 3.5,
+    "expansion_enabled": false
   },
   "risk": {
     "initial_capital": 10000.0,
-    "leverage": 3.5,
+    "leverage": 1.0,
     "risk_per_trade_pct": 1.5,
     "max_position_allocation_pct": 50.0
   },
   "execution": {
     "commission_pct": 0.05,
-    "slippage_ticks": 1
+    "slippage_ticks": 1,
+    "tick_size": 0.01
   }
 }

@@ -135,44 +135,66 @@ class BacktestEngine:
 
                 # Intrabar SL / TP execution check
                 if active_trade.signal_type == "LONG":
-                    sl_hit = c_low <= active_trade.sl_price
-                    tp_hit = c_high >= active_trade.tp_price
-
-                    if sl_hit and tp_hit:
+                    if c_open <= active_trade.sl_price:
                         base_exit = min(c_open, active_trade.sl_price)
-                        exit_price = (base_exit - self.exec_cfg.slippage_ticks * 0.1) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
+                        exit_price = (base_exit - self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
                         exit_reason = "SL"
                         is_closed = True
-                    elif sl_hit:
-                        base_exit = min(c_open, active_trade.sl_price)
-                        exit_price = (base_exit - self.exec_cfg.slippage_ticks * 0.1) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
-                        exit_reason = "SL"
-                        is_closed = True
-                    elif tp_hit:
+                    elif c_open >= active_trade.tp_price:
                         base_exit = max(c_open, active_trade.tp_price)
-                        exit_price = (base_exit - self.exec_cfg.slippage_ticks * 0.1) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
+                        exit_price = (base_exit - self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
                         exit_reason = "TP"
                         is_closed = True
+                    else:
+                        sl_hit = c_low <= active_trade.sl_price
+                        tp_hit = c_high >= active_trade.tp_price
+    
+                        if sl_hit and tp_hit:
+                            base_exit = min(c_open, active_trade.sl_price)
+                            exit_price = (base_exit - self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
+                            exit_reason = "SL"
+                            is_closed = True
+                        elif sl_hit:
+                            base_exit = min(c_open, active_trade.sl_price)
+                            exit_price = (base_exit - self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
+                            exit_reason = "SL"
+                            is_closed = True
+                        elif tp_hit:
+                            base_exit = max(c_open, active_trade.tp_price)
+                            exit_price = (base_exit - self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 - self.exec_cfg.slippage_pct)
+                            exit_reason = "TP"
+                            is_closed = True
 
                 elif active_trade.signal_type == "SHORT":
-                    sl_hit = c_high >= active_trade.sl_price
-                    tp_hit = c_low <= active_trade.tp_price
-
-                    if sl_hit and tp_hit:
+                    if c_open >= active_trade.sl_price:
                         base_exit = max(c_open, active_trade.sl_price)
-                        exit_price = (base_exit + self.exec_cfg.slippage_ticks * 0.1) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
+                        exit_price = (base_exit + self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
                         exit_reason = "SL"
                         is_closed = True
-                    elif sl_hit:
-                        base_exit = max(c_open, active_trade.sl_price)
-                        exit_price = (base_exit + self.exec_cfg.slippage_ticks * 0.1) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
-                        exit_reason = "SL"
-                        is_closed = True
-                    elif tp_hit:
+                    elif c_open <= active_trade.tp_price:
                         base_exit = min(c_open, active_trade.tp_price)
-                        exit_price = (base_exit + self.exec_cfg.slippage_ticks * 0.1) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
+                        exit_price = (base_exit + self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
                         exit_reason = "TP"
                         is_closed = True
+                    else:
+                        sl_hit = c_high >= active_trade.sl_price
+                        tp_hit = c_low <= active_trade.tp_price
+    
+                        if sl_hit and tp_hit:
+                            base_exit = max(c_open, active_trade.sl_price)
+                            exit_price = (base_exit + self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
+                            exit_reason = "SL"
+                            is_closed = True
+                        elif sl_hit:
+                            base_exit = max(c_open, active_trade.sl_price)
+                            exit_price = (base_exit + self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
+                            exit_reason = "SL"
+                            is_closed = True
+                        elif tp_hit:
+                            base_exit = min(c_open, active_trade.tp_price)
+                            exit_price = (base_exit + self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) if is_ref_mode else base_exit * (1.0 + self.exec_cfg.slippage_pct)
+                            exit_reason = "TP"
+                            is_closed = True
 
                 if not is_closed and i == n - 1:
                     exit_price = c_close
@@ -195,7 +217,7 @@ class BacktestEngine:
                     total_fees = active_trade.entry_fee + exit_fee
 
                     if is_ref_mode:
-                        total_slip = (self.exec_cfg.slippage_ticks * 0.1) * 2.0 * active_trade.size
+                        total_slip = (self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size) * 2.0 * active_trade.size
                     else:
                         entry_slip = abs(active_trade.entry_price * self.exec_cfg.slippage_pct * active_trade.size)
                         exit_slip = abs(active_trade.exit_price * self.exec_cfg.slippage_pct * active_trade.size)
@@ -239,7 +261,7 @@ class BacktestEngine:
 
                 if is_long_allowed or is_short_allowed:
                     if is_ref_mode:
-                        realized_entry = c_open + (self.exec_cfg.slippage_ticks * 0.1 if sig.signal_type == "LONG" else -self.exec_cfg.slippage_ticks * 0.1)
+                        realized_entry = c_open + (self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size if sig.signal_type == "LONG" else -self.exec_cfg.slippage_ticks * self.exec_cfg.tick_size)
                     else:
                         realized_entry = c_open * (1.0 + self.exec_cfg.slippage_pct if sig.signal_type == "LONG" else 1.0 - self.exec_cfg.slippage_pct)
 
@@ -268,9 +290,9 @@ class BacktestEngine:
                             margin_required=sizing.margin_required,
                             effective_leverage=sizing.effective_leverage,
                             capital_allocation_pct=sizing.capital_allocation_pct,
-                            risk_budget=sizing.risk_amount,
                             sl_price=sizing.sl_price,
                             tp_price=sizing.tp_price,
+                            risk_budget=sizing.risk_amount,
                             cap_activated=False,
                             ema_51=sig.ema_51,
                             rsi=sig.rsi,
@@ -282,11 +304,24 @@ class BacktestEngine:
                             swing_low=sig.swing_low,
                             entry_fee=round(entry_fee, 2),
                         )
+                        # Immediately update MTM PnL for the entry bar
+                        if active_trade.signal_type == "LONG":
+                            active_trade.gross_pnl = (c_close - realized_entry) * active_trade.size
+                        else:
+                            active_trade.gross_pnl = (realized_entry - c_close) * active_trade.size
+
                         latest_event = f"Trade #{trade_counter} {sig.signal_type} Opened @ ${realized_entry:.2f} (Size: {sizing.position_size:.4f} ETH)"
-                    in_position_at_bar_close[i] = True    # -------------------------------------------------------------
+                    in_position_at_bar_close[i] = True
+            # -------------------------------------------------------------
             # 3. Track Equity Curve & Peak Drawdown
             # -------------------------------------------------------------
-            current_unrealized = active_trade.gross_pnl if active_trade else 0.0
+            if active_trade:
+                est_exit_fee = c_close * active_trade.size * self.exec_cfg.taker_fee_pct
+                est_fees = active_trade.entry_fee + est_exit_fee
+                current_unrealized = active_trade.gross_pnl - est_fees
+            else:
+                current_unrealized = 0.0
+                
             current_equity = account.balance + current_unrealized
             account.equity = current_equity
 

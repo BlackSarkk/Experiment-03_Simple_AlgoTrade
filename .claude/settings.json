@@ -1,0 +1,32 @@
+{
+  "plugins": {
+    "github@claude-plugins-official": {
+      "enabled": true,
+      "scope": "project"
+    },
+    "security-guidance@claude-plugins-official": {
+      "enabled": true,
+      "scope": "project"
+    },
+    "pyright-lsp@claude-plugins-official": {
+      "enabled": true,
+      "scope": "project"
+    },
+    "sentry@claude-plugins-official": {
+      "enabled": true,
+      "scope": "project"
+    },
+    "slack@claude-plugins-official": {
+      "enabled": true,
+      "scope": "project"
+    }
+  },
+  "knownMarketplaces": {
+    "claude-plugins-official": {
+      "enabled": true
+    },
+    "claude-code": {
+      "enabled": true
+    }
+  }
+}

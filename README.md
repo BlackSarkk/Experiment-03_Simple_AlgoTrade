@@ -7,7 +7,7 @@ Rule-based ETHUSDT perpetual trading pipeline with exact Pine Script reproductio
 This project provides a robust engine for testing and live-simulating crypto trading strategies. The current workflow relies on a **Configuration Preset System**. Instead of passing individual parameters via CLI, full strategy configurations are loaded from JSON files located in `configs/`.
 
 - **`configs/default.json`**: Baseline defaults. The timeframe is inherited from the `pipeline.sh` script or environment variables.
-- **`configs/config1_ETHUSDT-15m.json`**: Validated Phase 6 baseline (Candidate 5). Named presets explicitly override symbol, timeframe, strategy inputs, risk, and execution settings.
+- **`configs/default.json`**: Validated Phase 6 baseline (Candidate 5). Named presets explicitly override symbol, timeframe, strategy inputs, risk, and execution settings.
 
 ## Project Structure
 
@@ -16,6 +16,12 @@ This project provides a robust engine for testing and live-simulating crypto tra
 - `src/` - Core engine (Backtest, Paper Forward, Strategy Logic, Config Loader)
 - `tests/` - Integration and unit tests
 - `pipeline.sh` - Main entrypoint wrapper
+
+### Historical Replay
+Execute the historical replay engine using a specific configuration preset:
+```bash
+./pipeline.sh --historical-replay --default
+```
 
 ## Installation
 
@@ -32,13 +38,13 @@ chmod +x pipeline.sh
 ### Backtesting
 Run a backtest using a specific configuration preset:
 ```bash
-./pipeline.sh --backtest --config1_ETHUSDT-15m
+./pipeline.sh --backtest --default
 ```
 
 ### Forward Testing (Paper Trading)
 Start a fresh forward test, pulling the latest data and resetting state with custom config:
 ```bash
-./pipeline.sh --forward-test --reset --clear-cache --config1_ETHUSDT-15m
+./pipeline.sh --forward-test --reset --clear-cache --default
 ```
 
 Start a fresh forward test, pulling the latest data and resetting state with default settings:
