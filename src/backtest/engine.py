@@ -73,7 +73,7 @@ class BacktestEngine:
     def __init__(self, config: PipelineConfig):
         self.config = config
         self.strategy = BaselineStrategy(config.strategy)
-        self.risk_manager = BaselineRiskManager(config.risk, config.strategy)
+        self.risk_manager = BaselineRiskManager(config.risk, config.strategy, config.execution)
         self.exec_cfg = config.execution
         self.console = Console()
 

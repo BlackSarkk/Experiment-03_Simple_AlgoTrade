@@ -47,12 +47,37 @@ class StrategyConfig:
 
 @dataclass
 class RiskConfig:
+    """Risk policy.
+
+    RISK CONVENTION (GROSS / PRICE-RISK):
+      risk_per_trade_pct is a *price-risk* budget only: size = (equity * pct) / |entry - sl|.
+      Fees and slippage are NOT deducted from this budget; they are accounted separately
+      in the execution/accounting layer. Realized loss on a stopped-out trade is therefore
+      slightly larger than risk_per_trade_pct. Optimizer objectives must be read with this
+      in mind.
+
+    ALLOCATION CAP SEMANTICS (MARGIN-BASED):
+      max_position_allocation_pct is the maximum fraction of account equity committed as
+      MARGIN. Leverage then converts that margin into notional:
+          max_margin   = equity * max_position_allocation_pct
+          max_notional = max_margin * leverage
+      (Previously the cap was applied to notional directly and then multiplied by leverage,
+      which made a "50% cap" mean 175% of equity at 3.5x. It is now unambiguous.)
+      At leverage 1.0 both formulations coincide, so the frozen baseline is unchanged.
+    """
     initial_capital: float = 10000.0
-    risk_per_trade_pct: float = 0.015       # 1.5% compounding equity risk per trade
-    max_position_allocation_pct: float = 0.50  # 50% max position capital allocation cap
-    leverage: float = 3.5                   # 3.5x leverage
+    risk_per_trade_pct: float = 0.015       # 1.5% compounding equity price-risk per trade
+    max_position_allocation_pct: float = 0.50  # 50% of equity max committed as margin
+    leverage: float = 1.0                   # SINGLE SOURCE OF TRUTH for the leverage default
     min_position_size: float = 0.001        # Minimum order size in base asset
     max_leverage_limit: float = 50.0        # Hard leverage cap
+    quantity_step: float = 0.001            # Instrument quantity step (ETHUSDT futures = 0.001)
+
+    # Sizing mode — A/B harness only. "RISK_BASED" is the production default.
+    #   RISK_BASED     : compounding price-risk budget + margin allocation cap (production)
+    #   FIXED_NOTIONAL : flat notional per trade, no risk budget, no allocation cap
+    sizing_mode: str = "RISK_BASED"
+    fixed_notional: float = 0.0             # 0 -> falls back to initial_capital
 
 
 @dataclass
@@ -88,6 +113,7 @@ class PipelineConfig:
 
     # Reset & Cache Controls (Defaults must always be False for safety!)
     hard_reset: bool = False                # Complete destruction of all generated files
+    risk_policy_source: str = ""       # Provenance of the active risk policy (set at load)
     reset: bool = False                     # Stage-scoped reset
     clear_cache: bool = False               # Market data cache deletion ONLY
     reset_cache: bool = False               # Alias for clear_cache

@@ -54,7 +54,7 @@ class PaperForwardEngine:
     def __init__(self, config: PipelineConfig):
         self.config = config
         self.strategy = BaselineStrategy(config.strategy)
-        self.risk_manager = BaselineRiskManager(config.risk, config.strategy)
+        self.risk_manager = BaselineRiskManager(config.risk, config.strategy, config.execution)
         self.feed = LiveMarketFeed(
             symbol=config.platform.symbol,
             resolution=config.platform.resolution,

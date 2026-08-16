@@ -117,6 +117,59 @@ def print_effective_strategy_configuration(cfg: PipelineConfig):
     print("=" * 80 + "\n")
 
 
+def slice_evaluation_window(df, platform_cfg):
+    """Restrict an indicator-attached frame to the requested evaluation window.
+
+    The market-data cache is allowed to be wider than the requested range (extra candles
+    before `start_date` seed indicator warmup, and reuse across runs may leave a longer
+    file). The *evaluation* window must never be wider than requested.
+
+    `end_date` given as a bare date (YYYY-MM-DD) is treated as inclusive end-of-day
+    (23:59:59 UTC), matching how a "2024-01-01 -> 2026-08-15" range reads.
+
+    Returns the sliced frame; indicator columns are preserved unchanged because they were
+    computed on the full frame before slicing.
+    """
+    import pandas as pd
+
+    if df.empty or "datetime" not in df.columns:
+        return df
+
+    dt = pd.to_datetime(df["datetime"], utc=True)
+    total = len(df)
+    mask = pd.Series(True, index=df.index)
+
+    start_str = platform_cfg.start_date
+    end_str = platform_cfg.end_date
+
+    if start_str:
+        req_start = pd.Timestamp(start_str, tz="UTC")
+        mask &= (dt >= req_start)
+    if end_str:
+        req_end = pd.Timestamp(end_str, tz="UTC")
+        if len(str(end_str)) == 10:  # bare date -> inclusive end of day
+            req_end = req_end + pd.Timedelta(hours=23, minutes=59, seconds=59)
+        mask &= (dt <= req_end)
+
+    if not start_str and not end_str:
+        return df
+
+    df_eval = df[mask].reset_index(drop=True)
+    warmup = total - len(df_eval)
+
+    if df_eval.empty:
+        raise ValueError(
+            f"Evaluation window [{start_str} .. {end_str}] selected 0 candles from a "
+            f"{total}-candle cache. Check the configured dates."
+        )
+
+    logger.info(
+        f"Evaluation window: {df_eval['datetime'].iloc[0]} -> {df_eval['datetime'].iloc[-1]} "
+        f"| {len(df_eval)} evaluation candles | {warmup} warmup/out-of-range candles excluded"
+    )
+    return df_eval
+
+
 def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False, maintenance_only: bool = False):
 
     print_banner(cfg)
@@ -196,9 +249,16 @@ def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False, maintenanc
     df_raw = data_loader.load_ohlcv(cfg.platform, reset_cache=cfg.clear_cache)
 
     # 2. Indicator Calculation
+    # Indicators are computed on the FULL cached frame so that candles before the requested
+    # start date can seed EMA/RSI/ATR/volume warmup. They are then dropped from the evaluation
+    # frame below, so warmup candles can never produce trades, PnL, or drawdown.
     logger.info("Computing technical indicators (51 EMA, 14 RSI, 14 ATR, 8 Consolidation, 8 Swing S/R, 20 Vol SMA)...")
     df_indicators = compute_all_indicators(df_raw, cfg.strategy)
-    logger.info(f"Indicators attached to {len(df_indicators)} candles.")
+    logger.info(f"Indicators attached to {len(df_indicators)} candles (full cache incl. warmup).")
+
+    # 2b. Strict evaluation-window slicing.
+    #     The cache MAY be wider than the requested range; the evaluation window MAY NOT.
+    df_indicators = slice_evaluation_window(df_indicators, cfg.platform)
 
     # 3. Backtest Execution
     if cfg.run_backtest and not cfg.run_robustness and not cfg.run_forward_test:
@@ -232,7 +292,9 @@ def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False, maintenanc
         if cfg.forward_mode == "HISTORICAL_REPLAY":
             from forward_test.replay_engine import HistoricalReplayEngine
             logger.info(f"Executing Historical Replay Forward Engine (Mode: {cfg.forward_mode})...")
-            forward_engine = HistoricalReplayEngine(cfg, df_raw)
+            # Pass the SAME indicator-attached, evaluation-window-sliced frame the backtest
+            # uses, so the two paths cannot drift on range or warmup handling.
+            forward_engine = HistoricalReplayEngine(cfg, df_indicators)
             forward_engine.run_replay()
         else:
             logger.info(f"Executing Paper Forward Testing Engine (Mode: {cfg.forward_mode})...")
@@ -304,9 +366,40 @@ def main():
     cfg.strategy.short_enabled = s_data.get("short_enabled", True)
     cfg.strategy.risk_reward_ratio = s_data.get("risk_reward_ratio", 1.5)
 
-    r_data = preset_data.get("risk", {})
+    # --- Risk policy source of truth -------------------------------------------------
+    # configs/riskmanager.json is AUTHORITATIVE for all execution stages (Backtest,
+    # Historical Replay, Forward/Paper). A legacy "risk" block inside a strategy preset
+    # is kept for compatibility but is overridden field-by-field by riskmanager.json.
+    # Precedence:  riskmanager.json  >  preset "risk" block  >  RiskConfig dataclass
+    r_data = dict(preset_data.get("risk", {}))
+    risk_policy_path = "configs/riskmanager.json"
+    risk_policy_loaded = False
+    if os.path.exists(risk_policy_path):
+        with open(risk_policy_path, "r") as f:
+            policy = json.load(f)
+        overrides = policy.get("risk", {})
+        overridden = sorted(k for k in overrides if k in r_data and r_data[k] != overrides[k])
+        r_data.update(overrides)
+        risk_policy_loaded = True
+        print("============================================================")
+        print(" ACTIVE RISK POLICY (authoritative)")
+        print(f" Source: {risk_policy_path}")
+        if overridden:
+            print(f" Overrode preset 'risk' fields: {', '.join(overridden)}")
+        print("============================================================")
+    else:
+        logger.warning(
+            f"{risk_policy_path} not found — falling back to the preset 'risk' block. "
+            "Production runs should define the authoritative risk policy."
+        )
+    cfg.risk_policy_source = risk_policy_path if risk_policy_loaded else f"preset:{args.config_preset}"
+
     cfg.risk.initial_capital = r_data.get("initial_capital", 10000.0)
-    cfg.risk.leverage = r_data.get("leverage", 1.0)
+    # RiskConfig dataclass defaults are the single source of truth for fallbacks.
+    cfg.risk.leverage = r_data.get("leverage", cfg.risk.leverage)
+    cfg.risk.quantity_step = r_data.get("quantity_step", cfg.risk.quantity_step)
+    cfg.risk.sizing_mode = r_data.get("sizing_mode", cfg.risk.sizing_mode)
+    cfg.risk.fixed_notional = r_data.get("fixed_notional", cfg.risk.fixed_notional)
     cfg.risk.risk_per_trade_pct = r_data.get("risk_per_trade_pct", 1.5) / 100.0
     cfg.risk.max_position_allocation_pct = r_data.get("max_position_allocation_pct", 50.0) / 100.0
 

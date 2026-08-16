@@ -1,0 +1,15 @@
+{
+  "_name": "Phase 2 Active Risk Policy",
+  "_description": "Globally authoritative risk-management policy for Backtest, Historical Replay and Forward/Paper. Overrides any legacy 'risk' block in strategy presets.",
+  "_validation": "Phase 2 frozen: Backtest <-> Historical Replay parity PASS on 2024-01-01 -> 2026-08-15 (91,968 candles, 626 comparable closed trades, 0 mismatches)",
+  "_convention": "risk_per_trade_pct is a GROSS price-risk budget; fees/slippage accounted separately. max_position_allocation_pct is the max fraction of equity committed as MARGIN (max_notional = equity * alloc * leverage).",
+
+  "risk": {
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "leverage": 1.0,
+    "risk_per_trade_pct": 1.5,
+    "max_position_allocation_pct": 50.0,
+    "quantity_step": 0.001
+  }
+}

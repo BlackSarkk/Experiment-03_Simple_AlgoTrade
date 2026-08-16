@@ -1,0 +1,35 @@
+{
+  "_note": "Exact pre-Phase-2 risk configuration belonging to backup/baseline_old.py. Reference only.",
+  "_recovered_from": "git HEAD (pre-Phase-2): src/common/config.py RiskConfig + configs/default.json",
+
+  "risk_config_dataclass_defaults": {
+    "initial_capital": 10000.0,
+    "risk_per_trade_pct": 0.015,
+    "max_position_allocation_pct": 0.50,
+    "leverage": 3.5,
+    "min_position_size": 0.001,
+    "max_leverage_limit": 50.0
+  },
+
+  "default_json_risk_block": {
+    "initial_capital": 10000.0,
+    "leverage": 1.0,
+    "risk_per_trade_pct": 1.5,
+    "max_position_allocation_pct": 50.0
+  },
+
+  "execution_values_in_effect": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  },
+
+  "old_behaviour_summary": {
+    "allocation_cap": "max_nominal = equity * leverage * max_position_allocation_pct (notional-based; 50% became 175% notional at 3.5x)",
+    "invalid_sl": "silently substituted a 1% stop (entry*0.99 LONG / entry*1.01 SHORT)",
+    "quantity_rounding": "round(final_size, 4) — nearest, could round up above the risk budget",
+    "price_rounding": "round(sl_price, 2) / round(tp_price, 2) — fixed 2dp, not tick-aware",
+    "margin_safety": "margin_required computed but never validated against available capital",
+    "leverage_defaults": "conflicting: dataclass 3.5 vs main.py runtime fallback 1.0"
+  }
+}

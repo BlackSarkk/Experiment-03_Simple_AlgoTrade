@@ -40,7 +40,15 @@ class HistoricalReplayEngine(PaperForwardEngine):
         self.last_warmup_candle_ts = int(pd.to_datetime("2024-01-01 00:00:00").tz_localize("UTC").timestamp())
 
         # Precompute indicators to avoid O(N^2)
-        self.df_indicators = compute_all_indicators(self.df_raw, self.config.strategy)
+        # main.py supplies a frame that already has indicators attached (computed on the full
+        # cache, including pre-start warmup candles) and has already been sliced to the
+        # evaluation window by slice_evaluation_window(). Recomputing here would re-derive
+        # indicators from the sliced frame and silently lose that warmup, so only compute
+        # when an un-indicatored frame is passed (e.g. direct construction in a test).
+        if "ema_51" in self.df_raw.columns:
+            self.df_indicators = self.df_raw
+        else:
+            self.df_indicators = compute_all_indicators(self.df_raw, self.config.strategy)
         
         # Prevent stale feed rejection during replay
         self.feed.is_feed_stale = lambda: False
