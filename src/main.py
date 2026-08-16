@@ -311,7 +311,8 @@ def main():
     parser.add_argument("--forward-test", action="store_true", default=False, help="Run paper forward test engine")
 
     # Config Preset
-    parser.add_argument("--config-preset", type=str, default="default", help="Config preset name")
+    parser.add_argument("--config-preset", type=str, default="configs/default.json",
+                        help="Path to a config JSON (or a bare preset name resolved under configs/)")
 
     # Reset & Cache Controls (Defaults MUST be False for safety!)
     parser.add_argument("--hard-reset", action="store_true", default=False, help="Complete destruction of all generated files")
@@ -332,17 +333,34 @@ def main():
     cfg = PipelineConfig()
 
     import json
-    config_path = f"configs/{args.config_preset}.json"
-    if not os.path.exists(config_path):
-        alt = f"configs/{args.config_preset}.config"   # OP-BB snapshots use .config (still JSON)
-        if os.path.exists(alt):
-            config_path = alt
-    if not os.path.exists(config_path):
-        print(f"ERROR: Config preset '{config_path}' does not exist.")
+    # --config-preset accepts a path (pipeline.sh resolves and passes one) or a bare
+    # preset name. Candidates are tried in order; first hit wins.
+    _raw = args.config_preset
+    config_path = None
+    for cand in (_raw, f"{_raw}.json",
+                 os.path.join("configs", _raw),
+                 os.path.join("configs", f"{_raw}.json")):
+        if os.path.isfile(cand):
+            config_path = cand
+            break
+    if config_path is None:
+        print(f"ERROR: Config file not found: '{_raw}'")
         sys.exit(1)
-        
-    with open(config_path, "r") as f:
-        preset_data = json.load(f)
+
+    try:
+        with open(config_path, "r") as f:
+            preset_data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: '{config_path}' is not valid JSON: {e}")
+        sys.exit(1)
+    if not isinstance(preset_data, dict):
+        print(f"ERROR: '{config_path}' must contain a JSON object.")
+        sys.exit(1)
+    _missing = [k for k in ("symbol", "timeframe", "strategy", "risk", "execution")
+                if k not in preset_data]
+    if _missing:
+        print(f"ERROR: '{config_path}' is missing required fields: {', '.join(_missing)}")
+        sys.exit(1)
 
     cfg.platform.symbol = preset_data.get("symbol", "ETHUSDT")
     cfg.platform.platform = preset_data.get("platform", "BINANCE_FUTURES")
@@ -384,7 +402,7 @@ def main():
     if preset_owns_risk:
         print("============================================================")
         print(" ACTIVE RISK POLICY (preset-owned)")
-        print(f" Source: configs/{args.config_preset}.json  (riskmanager.json bypassed)")
+        print(f" Source: {config_path}  (riskmanager.json bypassed)")
         print("============================================================")
     if os.path.exists(risk_policy_path) and not preset_owns_risk:
         with open(risk_policy_path, "r") as f:
@@ -404,7 +422,7 @@ def main():
             f"{risk_policy_path} not found — falling back to the preset 'risk' block. "
             "Production runs should define the authoritative risk policy."
         )
-    cfg.risk_policy_source = f"preset:{args.config_preset}" if preset_owns_risk else risk_policy_path if risk_policy_loaded else f"preset:{args.config_preset}"
+    cfg.risk_policy_source = f"preset:{config_path}" if preset_owns_risk else risk_policy_path if risk_policy_loaded else f"preset:{config_path}"
 
     cfg.risk.initial_capital = r_data.get("initial_capital", 10000.0)
     # RiskConfig dataclass defaults are the single source of truth for fallbacks.
@@ -426,8 +444,8 @@ def main():
     # Startup display
     print("============================================================")
     print(" ACTIVE CONFIG PRESET")
-    print(f" Preset: {args.config_preset}")
-    print(f" Source: configs/{args.config_preset}.json")
+    print(f" Config: {config_path}")
+    print(f" Source: {config_path}")
     print(" Timeframe source: preset")
     print("============================================================")
 
