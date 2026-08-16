@@ -87,6 +87,10 @@ while [[ $# -gt 0 ]]; do
       CONFIG_PRESET="default"
       shift
       ;;
+    --config1)
+      CONFIG_PRESET="config1-ETHUSDTP15m"
+      shift
+      ;;
     --config*)
       CONFIG_PRESET="${1#--}"
       shift
@@ -108,8 +112,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [ ! -f "configs/${CONFIG_PRESET}.json" ]; then
-    echo "ERROR: Config preset 'configs/${CONFIG_PRESET}.json' does not exist."
+if [ ! -f "configs/${CONFIG_PRESET}.json" ] && [ ! -f "configs/${CONFIG_PRESET}.config" ]; then
+    echo "ERROR: Config preset 'configs/${CONFIG_PRESET}' (.json or .config) does not exist."
     exit 1
 fi
 

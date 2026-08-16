@@ -334,6 +334,10 @@ def main():
     import json
     config_path = f"configs/{args.config_preset}.json"
     if not os.path.exists(config_path):
+        alt = f"configs/{args.config_preset}.config"   # OP-BB snapshots use .config (still JSON)
+        if os.path.exists(alt):
+            config_path = alt
+    if not os.path.exists(config_path):
         print(f"ERROR: Config preset '{config_path}' does not exist.")
         sys.exit(1)
         
@@ -372,9 +376,17 @@ def main():
     # is kept for compatibility but is overridden field-by-field by riskmanager.json.
     # Precedence:  riskmanager.json  >  preset "risk" block  >  RiskConfig dataclass
     r_data = dict(preset_data.get("risk", {}))
-    risk_policy_path = "configs/riskmanager.json"
+    risk_policy_path = "src/risk_management/riskmanager.json"
     risk_policy_loaded = False
-    if os.path.exists(risk_policy_path):
+    # A preset may declare "_risk_policy": "preset" to own its risk block outright
+    # (candidate presets config1-4 carry their own validated leverage/risk/allocation).
+    preset_owns_risk = str(preset_data.get("_risk_policy", "")).lower() == "preset"
+    if preset_owns_risk:
+        print("============================================================")
+        print(" ACTIVE RISK POLICY (preset-owned)")
+        print(f" Source: configs/{args.config_preset}.json  (riskmanager.json bypassed)")
+        print("============================================================")
+    if os.path.exists(risk_policy_path) and not preset_owns_risk:
         with open(risk_policy_path, "r") as f:
             policy = json.load(f)
         overrides = policy.get("risk", {})
@@ -387,12 +399,12 @@ def main():
         if overridden:
             print(f" Overrode preset 'risk' fields: {', '.join(overridden)}")
         print("============================================================")
-    else:
+    elif not preset_owns_risk:
         logger.warning(
             f"{risk_policy_path} not found — falling back to the preset 'risk' block. "
             "Production runs should define the authoritative risk policy."
         )
-    cfg.risk_policy_source = risk_policy_path if risk_policy_loaded else f"preset:{args.config_preset}"
+    cfg.risk_policy_source = f"preset:{args.config_preset}" if preset_owns_risk else risk_policy_path if risk_policy_loaded else f"preset:{args.config_preset}"
 
     cfg.risk.initial_capital = r_data.get("initial_capital", 10000.0)
     # RiskConfig dataclass defaults are the single source of truth for fallbacks.
