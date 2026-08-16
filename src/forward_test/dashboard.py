@@ -11,9 +11,11 @@ Features:
 All timestamps rendered in IST (UTC+5:30).
 """
 
+import io
 import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -26,8 +28,133 @@ IST = timezone(timedelta(hours=5, minutes=30))
 class PaperDashboard:
     """Redesigned compact, clean Rich terminal dashboard with top charts, trade history, and split account/performance panels."""
 
+    # Vertical budget: total rendered lines = FIXED_CHROME + large-chart plot_h.
+    # Measured empirically (see tests); keep in sync if panels are added/removed.
+    # Total rendered height = FIXED_CHROME + large-chart plot_h. The chart is the only
+    # elastic element, so it absorbs all spare vertical space and the dashboard fills
+    # exactly one screen. Below MIN_CHART_H the terminal is too short and Rich's
+    # alternate-screen mode crops rather than scrolls.
+    FIXED_CHROME = 36
+    MIN_CHART_H = 4
+    MAX_CHART_H = 30
+
     def __init__(self):
         self.console = Console()
+        self._chart_h_override = None      # rows granted to the large chart this frame
+        self._chrome_rows = self.FIXED_CHROME
+        self._chrome_shape = None          # layout shape the cached chrome measurement is valid for
+
+    @staticmethod
+    def _usd_size(t: Dict[str, Any]) -> float:
+        """USD notional of a trade for DISPLAY only: quantity x entry/fill price.
+
+        Stored quantities are never modified — this is a presentation-layer derivation.
+        Falls back to the engine's recorded notional (itself entry_price * quantity) if
+        the multiplication is unavailable, so the column degrades to the same number
+        rather than to a misleading zero.
+        """
+        qty = float(t.get("size", 0.0) or 0.0)
+        entry = float(t.get("entry_price", 0.0) or 0.0)
+        usd = qty * entry
+        if usd <= 0.0:
+            usd = float(t.get("notional", 0.0) or 0.0)
+        return usd
+
+    @staticmethod
+    def _pct_bar(pct: float, width: int = 15) -> str:
+        """Horizontal 0-100% bar with sub-cell resolution.
+
+        A plain `int(pct/100 * 15)` bar has only 15 steps (6.67% each) AND truncates, so
+        49% and 53% both floor to 7 cells and render identically. Eighth-width block
+        characters give 15*8 = 120 steps (~0.83% each), so neighbouring values are
+        visibly different and the bar length matches the printed number.
+        """
+        pct = max(0.0, min(100.0, float(pct)))
+        eighths = int(round((pct / 100.0) * width * 8))
+        full, rem = divmod(eighths, 8)
+        bar = "█" * full
+        if rem:
+            bar += "▏▎▍▌▋▊▉"[rem - 1]
+        return bar.ljust(width, "░")
+
+    @staticmethod
+    def _fmt_volume(v: float) -> str:
+        """Compact volume label (1.23M / 456.7K / 89.1)."""
+        av = abs(v)
+        if av >= 1_000_000_000:
+            return f"{v / 1_000_000_000:.2f}B"
+        if av >= 1_000_000:
+            return f"{v / 1_000_000:.2f}M"
+        if av >= 1_000:
+            return f"{v / 1_000:.1f}K"
+        return f"{v:.1f}"
+
+    def _render_volume_panel(self, candles: List[Dict[str, Any]], title: str) -> Panel:
+        """Render a terminal-native volume histogram inside a Panel.
+
+        Bars are coloured by the direction of their own candle (green = close >= open),
+        which is the standard volume-histogram convention. Height uses eighth-block
+        characters for sub-cell resolution. Purely presentational.
+        """
+        if not candles:
+            txt = Text("Waiting for market volume data...", style="dim white")
+            return Panel(txt, title=f"[bold cyan]{title}[/bold cyan]", border_style="cyan")
+
+        # Same window as the previous candle chart so the panel keeps its proportions
+        c_sub = candles[-35:]
+        n_c = len(c_sub)
+        vols = [float(c.get("volume", 0.0) or 0.0) for c in c_sub]
+
+        max_v = max(vols) if vols else 0.0
+        latest_v = vols[-1] if vols else 0.0
+        avg_v = (sum(vols) / len(vols)) if vols else 0.0
+
+        # Header summary line
+        header = Text()
+        header.append(
+            f"Max: {self._fmt_volume(max_v)}  │  Avg: {self._fmt_volume(avg_v)}  │  Now: ",
+            style="dim white",
+        )
+        header.append(f"{self._fmt_volume(latest_v)}", style="bold cyan")
+        if avg_v > 0:
+            rel = (latest_v / avg_v) * 100.0
+            header.append(f" ({rel:.0f}% of avg)", style="bold green" if rel >= 100.0 else "dim white")
+        header.append("\n", style="dim white")
+
+        # Two-row histogram, eighth-block sub-cell resolution (matches old panel height)
+        plot_h = 2
+        levels = " ▁▂▃▄▅▆▇█"
+        grid = [[" " for _ in range(n_c)] for _ in range(plot_h)]
+        styles = [["dim white" for _ in range(n_c)] for _ in range(plot_h)]
+
+        for x, c in enumerate(c_sub):
+            v = vols[x]
+            frac = (v / max_v) if max_v > 0 else 0.0
+            eighths = int(round(frac * plot_h * 8))
+            is_green = float(c.get("close", 0.0)) >= float(c.get("open", 0.0))
+            bar_style = "bold green" if is_green else "bold red"
+            for y in range(plot_h):
+                cell_from_bottom = plot_h - 1 - y
+                filled = max(0, min(8, eighths - cell_from_bottom * 8))
+                grid[y][x] = levels[filled]
+                if filled > 0:
+                    styles[y][x] = bar_style
+
+        content = Text()
+        content.append(header)
+
+        for y in range(plot_h):
+            label = self._fmt_volume(max_v) if y == 0 else ""
+            content.append(f"{label:>8} ┤ ", style="dim white")
+            for x in range(n_c):
+                content.append(grid[y][x], style=styles[y][x])
+            content.append("\n")
+
+        # No trailing newline: it would render an extra blank row inside the panel and
+        # the top strip is part of the fixed vertical budget.
+        content.append(f"{'0':>8} ┴" + ("─" * n_c), style="dim white")
+
+        return Panel(content, title=f"[bold cyan]{title}[/bold cyan]", border_style="cyan", padding=(0, 1))
 
     def _render_chart_panel(self, candles: List[Dict[str, Any]], title: str) -> Panel:
         """Render a terminal-native ASCII/Unicode mini candlestick chart inside a Panel."""
@@ -109,6 +236,60 @@ class PaperDashboard:
         return Panel(content, title=f"[bold cyan]{title}[/bold cyan]", border_style="cyan", padding=(0, 1))
 
     def render(self, state: Dict[str, Any]) -> Panel:
+        """Render the dashboard sized to fill exactly one screen (never scrolls).
+
+        Everything except the large chart is fixed-height, but that fixed height depends
+        on terminal WIDTH (long lines wrap), so it cannot be a constant. We measure it
+        once per width by laying the dashboard out at the minimum chart height, then give
+        the chart all remaining rows. The measurement is cached, so the common path is a
+        single layout pass.
+        """
+        term_h = self.console.height if (self.console and self.console.height) else 50
+        term_w = self.console.width if (self.console and self.console.width) else 200
+
+        # The chrome height depends on more than terminal width: several panels change
+        # line count depending on what the engine is doing. Caching on width alone meant
+        # the very first frame (no candles yet -> a 1-line "Waiting for data..." chart,
+        # FLAT position, no progress bar) calibrated the budget far too low, and once
+        # real candles arrived the dashboard overflowed and the bottom status row —
+        # CPU/RAM/Disk/State — was cropped off screen. Re-measure whenever the SHAPE
+        # changes, not just the width.
+        shape = (
+            term_w,
+            term_h,
+            bool(state.get("chart_candles")),                       # chart vs placeholder
+            bool(state.get("progress_task")),                       # extra progress panel
+            bool((state.get("market_trade") or {}).get("active_position")),  # 4-line vs 1-line
+        )
+
+        if self._chrome_shape != shape:
+            try:
+                self._chart_h_override = self.MIN_CHART_H
+                probe_console = Console(width=term_w, height=term_h, file=io.StringIO())
+                probe_console.print(self._build(state))
+                lines = len(probe_console.file.getvalue().rstrip("\n").split("\n"))
+                # +1 safety row: Live's viewport accounting is one line tighter than a
+                # plain capture, and overshooting by one costs the whole bottom border.
+                self._chrome_rows = max(0, lines - self.MIN_CHART_H) + 1
+                self._chrome_shape = shape
+            except Exception:
+                # Measurement is an optimisation; fall back to the static estimate.
+                self._chrome_rows = self.FIXED_CHROME
+
+        # The chart is the only elastic element, so it must be the one that yields when
+        # the terminal is short. Clamping at MIN_CHART_H would push the total past the
+        # viewport and Rich would crop the bottom — losing the status footer, which is
+        # exactly the failure we are preventing. Prefer MIN_CHART_H, but shrink below it
+        # (down to a single row) rather than let the footer fall off screen.
+        available = term_h - self._chrome_rows
+        if available >= self.MIN_CHART_H:
+            self._chart_h_override = min(self.MAX_CHART_H, available)
+        else:
+            # 2 is the floor: the chart's price axis interpolates over (plot_h - 1).
+            self._chart_h_override = max(2, available)
+        return self._build(state)
+
+    def _build(self, state: Dict[str, Any]) -> Panel:
         top = state.get("top_bar", {})
         candles = state.get("chart_candles", [])
         mkt_trd = state.get("market_trade", {})
@@ -162,7 +343,7 @@ class PaperDashboard:
         tf = top.get("timeframe", "3h")
         readiness_dict = state.get("readiness", {})
         chart_a = self._render_readiness_panel(readiness_dict)
-        chart_b = self._render_chart_panel(candles, f"Chart B: {tf} Timeframe")
+        chart_b = self._render_volume_panel(candles, f"Chart B: {tf} Volume")
 
         chart_grid.add_row(chart_a, chart_b)
 
@@ -235,7 +416,10 @@ class PaperDashboard:
         mkt_panel = Panel(left_table, title="[bold cyan]Market + Trade[/bold cyan]", border_style="cyan", expand=True)
 
         # --- Left Box 2: Recent Trade History (3 Most Recent Completed Trades) ---
-        history_table = Table(show_header=True, header_style="bold magenta", expand=True, padding=(0, 1))
+        # SIMPLE_HEAD drops the table's own outer box (the panel already draws a border),
+        # saving two rows of the fixed vertical budget without losing any data.
+        history_table = Table(show_header=True, header_style="bold magenta", expand=True,
+                              padding=(0, 1), box=box.SIMPLE_HEAD)
         history_table.add_column("#", justify="center", width=3)
         history_table.add_column("Side", justify="center", width=6)
         history_table.add_column("Entry IST", justify="center")
@@ -245,7 +429,8 @@ class PaperDashboard:
         history_table.add_column("Size", justify="right")
         history_table.add_column("Net PnL", justify="right")
 
-        displayed_trades = recent_trades[-3:] if recent_trades else []
+        max_hist = 3
+        displayed_trades = recent_trades[-max_hist:] if recent_trades else []
         for t in displayed_trades:
             side_color = "bold green" if t["side"] == "LONG" else "bold red"
             pnl_color = "bold green" if t["net_pnl"] >= 0 else "bold red"
@@ -256,15 +441,15 @@ class PaperDashboard:
                 t["exit_time_ist"],
                 f"${t['entry_price']:,.2f}",
                 f"${t['exit_price']:,.2f}",
-                f"{t['size']:.4f} Units",
+                f"${self._usd_size(t):,.2f}",
                 f"[{pnl_color}]${t['net_pnl']:+,.2f}[/{pnl_color}]"
             )
 
-        # Pad table to guarantee 3 rows height for consistent panel proportions
-        padded_rows_needed = 3 - len(displayed_trades)
+        # Pad table to a stable row count for consistent panel proportions
+        padded_rows_needed = max_hist - len(displayed_trades)
         for i in range(padded_rows_needed):
             if i == 0 and not displayed_trades:
-                history_table.add_row("-", "FLAT", "N/A", "N/A", "$0.00", "$0.00", "0.0000 Units", "$0.00")
+                history_table.add_row("-", "FLAT", "N/A", "N/A", "$0.00", "$0.00", "$0.00", "$0.00")
             else:
                 history_table.add_row("-", "-", "-", "-", "-", "-", "-", "-")
 
@@ -349,10 +534,26 @@ class PaperDashboard:
         bot_text.append(f"Feed: {bot.get('feed_speed', '0 B/s')}  │  ", style="dim white")
         bot_text.append(f"Last Update: {bot.get('last_market_update', 'N/A')}  │  ", style="dim white")
         bot_text.append(f"Reconnects: {bot.get('reconnect_count', 0)}  │  ", style="dim white")
-        cpu_str = bot.get('cpu_usage_str', f"{bot.get('cpu_usage_pct', 0.0)}%")
-        ram_str = bot.get('ram_usage_str', f"{bot.get('ram_usage_pct', 0.0)}%")
-        disk_str = bot.get('disk_usage_str', f"{bot.get('disk_usage_pct', 0.0)}%")
+        cpu_str = bot.get('cpu_usage_str') or "n/a"
+        ram_str = bot.get('ram_usage_str') or "n/a"
+        disk_str = bot.get('disk_usage_str') or "n/a"
         bot_text.append(f"CPU: {cpu_str}  │  RAM: {ram_str}  │  Disk: {disk_str}  │  ", style="dim white")
+
+        # CPU temperature, colour-graded so a thermal problem is visible at a glance.
+        temp_c = bot.get('cpu_temp_c')
+        temp_str = bot.get('cpu_temp_str') or "n/a"
+        if temp_c is None:
+            temp_style = "dim white"
+        elif temp_c >= 85.0:
+            temp_style = "bold red"
+        elif temp_c >= 70.0:
+            temp_style = "bold yellow"
+        else:
+            temp_style = "bold green"
+        bot_text.append("Temp: ", style="dim white")
+        bot_text.append(f"{temp_str}", style=temp_style)
+        bot_text.append("  │  ", style="dim white")
+
         bot_text.append(f"State: {bot.get('state_save_status', 'SAVED')}", style="bold green")
 
         return Panel(
@@ -364,7 +565,10 @@ class PaperDashboard:
         )
 
     def _render_large_candlestick_chart(self, candles: List[Dict[str, Any]], title: str) -> Panel:
-        """Render a large full-width terminal candlestick chart with wicks, EMA overlays, Y/X axes, and volume bars."""
+        """Render a large full-width terminal candlestick chart with wicks, EMA overlays and Y/X axes.
+
+        Candlesticks only — volume is shown separately in Chart B.
+        """
         if not candles:
             txt = Text("Waiting for market candle data...", style="dim white")
             return Panel(txt, title=f"[bold magenta]{title}[/bold magenta]", border_style="magenta")
@@ -404,8 +608,16 @@ class PaperDashboard:
             max_p = min_p + 1.0
         p_range = max_p - min_p
 
-        # Main Plot Height (10 rows tall instead of 14)
-        plot_h = 8
+        # Main plot height adapts to the terminal so the whole dashboard fits on one
+        # screen without scrolling. Everything above/below this chart is fixed-height
+        # (FIXED_CHROME lines); the chart absorbs whatever vertical space is left.
+        if self._chart_h_override is not None:
+            plot_h = self._chart_h_override
+        else:
+            term_height = self.console.height if (self.console and self.console.height) else 50
+            plot_h = max(self.MIN_CHART_H, min(self.MAX_CHART_H, term_height - self.FIXED_CHROME))
+        # The price axis interpolates over (plot_h - 1); a 1-row chart would divide by zero.
+        plot_h = max(2, plot_h)
 
         def price_to_y(p: float) -> int:
             y = int(((max_p - p) / p_range) * (plot_h - 1))
@@ -553,49 +765,10 @@ class PaperDashboard:
         time_row.append("\n")
         content.append(time_row)
 
-        # Volume Sub-chart (3 vertical rows) across FULL canvas_w
-        vols = [c["volume"] for c in c_draw]
-        sorted_vols = sorted(vols) if vols else [1.0]
-        # p95 cap prevents single volume spikes from squashing the scale
-        p95_idx = int(len(sorted_vols) * 0.95)
-        eff_max_vol = sorted_vols[min(p95_idx, len(sorted_vols) - 1)]
-        if eff_max_vol <= 0:
-            eff_max_vol = max(vols) if (vols and max(vols) > 0) else 1.0
-
-        vol_h = 1
-        if eff_max_vol >= 1_000_000:
-            vol_lbl_str = f"{eff_max_vol/1_000_000:6.1f}M"
-        else:
-            vol_lbl_str = f"{eff_max_vol/1_000:6.0f}K"
-
-        # Build 3-row vertical volume grid
-        for row_idx in range(vol_h):
-            row_text = Text()
-            if row_idx == 0:
-                row_text.append(f"{vol_lbl_str} ┤ ", style="dim white")
-            else:
-                row_text.append("          │ ", style="dim white")
-
-            for c in c_draw:
-                is_g = c["close"] >= c["open"]
-                c_style = "bold green" if is_g else "bold red"
-                v_ratio = min(1.0, c["volume"] / eff_max_vol)
-                v_height = v_ratio * vol_h
-                needed_height = vol_h - row_idx
-
-                if v_height >= needed_height:
-                    row_text.append("█", style=c_style)
-                elif v_height >= (needed_height - 0.5):
-                    row_text.append("▄", style=c_style)
-                elif v_height >= (needed_height - 0.8) and row_idx == vol_h - 1:
-                    row_text.append("▂", style=c_style)
-                else:
-                    row_text.append(" ", style="dim white")
-
-            row_text.append("\n")
-            content.append(row_text)
-
-        content.append("     0K ┴ " + ("─" * canvas_w) + "\n", style="dim white")
+        # NOTE: the volume sub-chart that used to live here was removed deliberately.
+        # Volume now has its own dedicated panel (Chart B), so repeating it under the
+        # price chart cost two rows of vertical budget for no extra information.
+        # This panel is candlesticks + EMAs only.
 
         return Panel(content, title=f"[bold magenta]{title}[/bold magenta]", border_style="magenta", expand=True, padding=(0, 1))
 
@@ -610,13 +783,8 @@ class PaperDashboard:
         bias = readiness.get("bias", "NEUTRAL")
         status = readiness.get("status", "WEAK")
         
-        buy_filled = int((buy_pct / 100.0) * 15)
-        buy_empty = 15 - buy_filled
-        sell_filled = int((sell_pct / 100.0) * 15)
-        sell_empty = 15 - sell_filled
-        
-        buy_bar = ("█" * buy_filled) + ("░" * buy_empty)
-        sell_bar = ("█" * sell_filled) + ("░" * sell_empty)
+        buy_bar = self._pct_bar(buy_pct)
+        sell_bar = self._pct_bar(sell_pct)
         
         table = Table.grid(padding=(0, 2))
         table.add_column("Side", justify="left", style="bold")

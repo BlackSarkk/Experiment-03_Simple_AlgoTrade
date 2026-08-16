@@ -1,57 +1,26 @@
-"""Generate one Pine v5 strategy per OP-BB config.
-
-Ports the user's base pine.pine to CURRENT validated Python behaviour:
-  * Bollinger filter replaced with the Stage-1 Python filter (min bandwidth / expansion
-    ratio vs bandwidth[lookback] / middle-band distance)
-  * margin-based allocation cap (max_margin = equity*alloc; max_notional = margin*leverage)
-  * risk budget from PLAIN equity, not leveraged equity
-  * SL/TP recomputed from the REALIZED entry fill, matching BaselineRiskManager
-  * quantity floored to quantity_step; SL/TP rounded to tick_size
-  * invalid/inverted SL rejects the trade (no 1% substitute)
-  * ADX retained as an inert toggle (default off) — not present in the Python strategy
-"""
-
-import json
-import os
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "pine")
-
-# Config1 and Config2 are both fully expressible by TEMPLATE: they share every strategy,
-# risk and execution value and differ only in filters.bollinger.enabled, which the template
-# injects as {bb_enabled}. Config1 stays PROTECTED because it is the frozen baseline that
-# every recorded result reconciles against; Config2 is safe to regenerate.
-MAP = [
-    ("config1-ETHUSDTP15m-long.json", "config1-ETHUSDTP15m-long.pine",
-     "ETHUSDT.P 15m — Candidate 158 OP-BB", "ETHUSDT.P 15m C158"),
-    ("config2-ETHUSDTP15m-long.json", "config2-ETHUSDTP15m-long.pine",
-     "ETHUSDT.P 15m — Candidate 158 OP-BB (Bollinger ON)", "ETHUSDT.P 15m C158-BB"),
-]
-PROTECTED = {"config1-ETHUSDTP15m-long.pine"}   # frozen baseline — never regenerate
-
-TEMPLATE = r'''//@version=5
-strategy("{title}", shorttitle="{short}", overlay=true, initial_capital={capital}, default_qty_type=strategy.cash, commission_type=strategy.commission.percent, commission_value={commission}, slippage={slippage}, process_orders_on_close=false, pyramiding=0, margin_long=0, margin_short=0)
+//@version=5
+strategy("ETHUSDT.P 15m — Candidate 158 OP-BB (Bollinger ON)", shorttitle="ETHUSDT.P 15m C158-BB", overlay=true, initial_capital=10000, default_qty_type=strategy.cash, commission_type=strategy.commission.percent, commission_value=0.05, slippage=1, process_orders_on_close=false, pyramiding=0, margin_long=0, margin_short=0)
 
 // =============================================================================
-// {title} — generated from configs/{cfgfile}
+// ETHUSDT.P 15m — Candidate 158 OP-BB (Bollinger ON) — generated from configs/config2-ETHUSDTP15m-long.json
 // =============================================================================
-// Source        : {source}
-// Development   : {dev_start} -> {dev_end}
-// Unseen month  : {uns_start} -> {uns_end}
-// Optimizer     : {arch}
-// EMA / RSI     = {ema} / {rsi}          OB / OS = {ob} / {os}
-// ATR           = {atr}
-// Consolidation = {cons} candles / {cmult} ATR
-// Swing         = {swing}      Volume SMA = {vsma}   Volume Mult = {vmult}
-// RR            = {rr}
+// Source        : config1 (frozen Candidate #158) with the Stage-1 Bollinger filter switched on
+// Development   : 2024-07-16 -> 2026-07-15
+// Unseen month  : 2026-07-16 -> 2026-08-15
+// Optimizer     : NEW
+// EMA / RSI     = 104 / 20          OB / OS = 64.0 / 23.0
+// ATR           = 7
+// Consolidation = 7 candles / 2.8 ATR
+// Swing         = 17      Volume SMA = 12   Volume Mult = 1.8
+// RR            = 3.6
 // Long ON / Short OFF
-// Leverage {lev}x | Risk {risk}% | Allocation {alloc}% | Qty step {qstep} | Tick {tick}
-// Bollinger     = len {bb_len} / std {bb_std} / minBW {bb_minbw}% / exp {bb_explb}-{bb_expratio} / midDist {bb_middist}
+// Leverage 4.0x | Risk 2.6% | Allocation 70.0% | Qty step 0.001 | Tick 0.01
+// Bollinger     = len 10 / std 2.3 / minBW 0.2% / exp 10-0.95 / midDist 0.15
 //
 // Reference (Python, current engine):
-//   Development  : {ref_dev_ret}% return, PF {ref_dev_pf}, DD {ref_dev_dd}%, {ref_dev_n} trades
-//   Unseen OFF   : {ref_uoff_ret}% return, PF {ref_uoff_pf}, DD {ref_uoff_dd}%, {ref_uoff_n} trades
-//   Unseen ON    : {ref_uon_ret}% return, PF {ref_uon_pf}, DD {ref_uon_dd}%, {ref_uon_n} trades
+//   Development  : 274.35% return, PF 1.296, DD 32.72%, 212 trades
+//   Unseen OFF   : 4.85% return, PF 1.319, DD 8.43%, 10 trades
+//   Unseen ON    : 7.62% return, PF 1.969, DD 8.43%, 6 trades
 //
 // IMPORTANT: run on BINANCE:ETHUSDT.P, 15m.
 // =============================================================================
@@ -60,21 +29,21 @@ strategy("{title}", shorttitle="{short}", overlay=true, initial_capital={capital
 // 1. TECHNICAL INDICATORS
 // =============================================================================
 grp_ind = "1. Technical Indicators"
-ema_len = input.int({ema}, "EMA Period", minval=5, group=grp_ind)
-rsi_len = input.int({rsi}, "RSI Period", minval=2, group=grp_ind)
-rsi_ob  = input.float({ob}, "RSI Overbought Threshold", minval=50.0, maxval=100.0, group=grp_ind)
-rsi_os  = input.float({os}, "RSI Oversold Threshold", minval=0.0, maxval=50.0, group=grp_ind)
-atr_len = input.int({atr}, "ATR Period", minval=1, group=grp_ind)
+ema_len = input.int(104, "EMA Period", minval=5, group=grp_ind)
+rsi_len = input.int(20, "RSI Period", minval=2, group=grp_ind)
+rsi_ob  = input.float(64.0, "RSI Overbought Threshold", minval=50.0, maxval=100.0, group=grp_ind)
+rsi_os  = input.float(23.0, "RSI Oversold Threshold", minval=0.0, maxval=50.0, group=grp_ind)
+atr_len = input.int(7, "ATR Period", minval=1, group=grp_ind)
 
 // =============================================================================
 // 2. CONSOLIDATION & VOLUME FILTERS
 // =============================================================================
 grp_cons = "2. Consolidation & Volume Filters"
-cons_len    = input.int({cons}, "Consolidation Lookback (Candles)", minval=3, group=grp_cons)
-cons_mult   = input.float({cmult}, "Consolidation ATR Multiplier", minval=0.5, step=0.1, group=grp_cons)
+cons_len    = input.int(7, "Consolidation Lookback (Candles)", minval=3, group=grp_cons)
+cons_mult   = input.float(2.8, "Consolidation ATR Multiplier", minval=0.5, step=0.1, group=grp_cons)
 use_vol     = input.bool(true, "Require Volume Breakout Filter", group=grp_cons)
-vol_sma_len = input.int({vsma}, "Volume SMA Period", minval=1, group=grp_cons)
-vol_mult    = input.float({vmult}, "Volume Multiplier vs SMA", minval=0.1, step=0.05, group=grp_cons)
+vol_sma_len = input.int(12, "Volume SMA Period", minval=1, group=grp_cons)
+vol_mult    = input.float(1.8, "Volume Multiplier vs SMA", minval=0.1, step=0.05, group=grp_cons)
 
 // =============================================================================
 // 3. RISK MANAGEMENT & POSITION SIZING  (mirrors BaselineRiskManager)
@@ -82,13 +51,13 @@ vol_mult    = input.float({vmult}, "Volume Multiplier vs SMA", minval=0.1, step=
 grp_risk = "3. Risk Management & Position Sizing"
 enable_long  = input.bool(true,  "Enable Long Trades",  group=grp_risk)
 enable_short = input.bool(false, "Enable Short Trades", group=grp_risk)
-leverage  = input.float({lev}, "Leverage (x)", minval=1.0, maxval=100.0, step=0.5, group=grp_risk)
-risk_pct  = input.float({risk}, "Account Risk % Per Trade (price risk, gross of fees)", minval=0.1, maxval=10.0, step=0.1, group=grp_risk)
-max_alloc = input.float({alloc}, "Max Equity Committed As MARGIN %", minval=5.0, maxval=100.0, step=5.0, group=grp_risk)
-rr_ratio  = input.float({rr}, "Risk-to-Reward Target (1 : X)", minval=0.5, step=0.1, group=grp_risk)
-swing_len = input.int({swing}, "Swing High/Low Lookback", minval=2, group=grp_risk)
-qty_step  = input.float({qstep}, "Instrument Quantity Step", minval=0.000001, step=0.001, group=grp_risk)
-tick_size = input.float({tick}, "Instrument Tick Size", minval=0.000001, step=0.01, group=grp_risk)
+leverage  = input.float(4.0, "Leverage (x)", minval=1.0, maxval=100.0, step=0.5, group=grp_risk)
+risk_pct  = input.float(2.6, "Account Risk % Per Trade (price risk, gross of fees)", minval=0.1, maxval=10.0, step=0.1, group=grp_risk)
+max_alloc = input.float(70.0, "Max Equity Committed As MARGIN %", minval=5.0, maxval=100.0, step=5.0, group=grp_risk)
+rr_ratio  = input.float(3.6, "Risk-to-Reward Target (1 : X)", minval=0.5, step=0.1, group=grp_risk)
+swing_len = input.int(17, "Swing High/Low Lookback", minval=2, group=grp_risk)
+qty_step  = input.float(0.001, "Instrument Quantity Step", minval=0.000001, step=0.001, group=grp_risk)
+tick_size = input.float(0.01, "Instrument Tick Size", minval=0.000001, step=0.01, group=grp_risk)
 min_qty   = input.float(0.001, "Minimum Position Size", minval=0.000001, step=0.001, group=grp_risk)
 
 // =============================================================================
@@ -105,13 +74,13 @@ show_hud   = input.bool(true, "Show On-Chart Performance HUD Table", group=grp_u
 // Signal gate only: never creates a signal, only blocks existing ones.
 // Each threshold set to 0 disables that sub-condition.
 grp_bb = "5. Bollinger Chop Filter"
-bb_enabled  = input.bool({bb_enabled}, "Enable Bollinger Filter", group=grp_bb)
-bb_len      = input.int({bb_len}, "Bollinger Length", minval=1, group=grp_bb)
-bb_std      = input.float({bb_std}, "Bollinger StdDev", minval=0.1, step=0.1, group=grp_bb)
-bb_min_bw   = input.float({bb_minbw}, "Min Bandwidth % (0 = off)", minval=0.0, step=0.1, group=grp_bb)
-bb_exp_lb   = input.int({bb_explb}, "Expansion Lookback", minval=1, group=grp_bb)
-bb_exp_ratio= input.float({bb_expratio}, "Expansion Min Ratio (0 = off)", minval=0.0, step=0.05, group=grp_bb)
-bb_mid_dist = input.float({bb_middist}, "Min Middle-Band Distance (0 = off)", minval=0.0, step=0.01, group=grp_bb)
+bb_enabled  = input.bool(true, "Enable Bollinger Filter", group=grp_bb)
+bb_len      = input.int(10, "Bollinger Length", minval=1, group=grp_bb)
+bb_std      = input.float(2.3, "Bollinger StdDev", minval=0.1, step=0.1, group=grp_bb)
+bb_min_bw   = input.float(0.2, "Min Bandwidth % (0 = off)", minval=0.0, step=0.1, group=grp_bb)
+bb_exp_lb   = input.int(10, "Expansion Lookback", minval=1, group=grp_bb)
+bb_exp_ratio= input.float(0.95, "Expansion Min Ratio (0 = off)", minval=0.0, step=0.05, group=grp_bb)
+bb_mid_dist = input.float(0.15, "Min Middle-Band Distance (0 = off)", minval=0.0, step=0.01, group=grp_bb)
 
 // =============================================================================
 // 6. ADX FILTER  (not part of the Python strategy — inert unless enabled)
@@ -287,7 +256,7 @@ if show_hud and barstate.islast
     pnl_color = net_pnl >= 0 ? #10b981 : #ef4444
     pos_str = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size, "#.###") + " ETH)" : strategy.position_size < 0 ? "SHORT (" + str.tostring(math.abs(strategy.position_size), "#.###") + " ETH)" : "FLAT"
     table.cell(hud, 0, 0, "Config", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
-    table.cell(hud, 1, 0, "{short}", text_color=#38bdf8, text_size=size.small, text_halign=text.align_right)
+    table.cell(hud, 1, 0, "ETHUSDT.P 15m C158-BB", text_color=#38bdf8, text_size=size.small, text_halign=text.align_right)
     table.cell(hud, 0, 1, "Net Profit ($)", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
     table.cell(hud, 1, 1, "$" + str.tostring(net_pnl, "#,###.00"), text_color=pnl_color, text_size=size.small, text_halign=text.align_right)
     table.cell(hud, 0, 2, "Win Rate (%)", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
@@ -302,49 +271,3 @@ if show_hud and barstate.islast
     table.cell(hud, 1, 6, bb_enabled ? "ON" : "OFF", text_color=bb_enabled ? #10b981 : #94a3b8, text_size=size.small, text_halign=text.align_right)
     table.cell(hud, 0, 7, "Active State", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
     table.cell(hud, 1, 7, pos_str, text_color=#38bdf8, text_size=size.small, text_halign=text.align_right)
-'''
-
-
-def main():
-    os.makedirs(OUT, exist_ok=True)
-    for cfgfile, pinefile, title, short in MAP:
-        if pinefile in PROTECTED:
-            print(f"  SKIP {pinefile} (protected: frozen baseline)")
-            continue
-        d = json.load(open(os.path.join(ROOT, "configs", cfgfile)))
-        s, r, b, e = d["strategy"], d["risk"], d["filters"]["bollinger"], d["execution"]
-        m = d.get("_reference_metrics", {})
-        uo, un = m.get("unseen_filter_off", {}), m.get("unseen_filter_on", {})
-        src = TEMPLATE.format(
-            title=title, short=short, cfgfile=cfgfile,
-            source=d.get("_source", ""), arch=d.get("_optimizer_architecture", ""),
-            dev_start=d.get("_development_start"), dev_end=d.get("_development_end"),
-            uns_start=d.get("_unseen_start"), uns_end=d.get("_unseen_end"),
-            capital=int(r["initial_capital"]), commission=e["commission_pct"],
-            slippage=int(e["slippage_ticks"]), tick=e["tick_size"], qstep=r["quantity_step"],
-            ema=int(s["ema_period"]), rsi=int(s["rsi_period"]),
-            ob=round(float(s["rsi_overbought"]), 1), os=round(float(s["rsi_oversold"]), 1),
-            atr=int(s["atr_period"]), cons=int(s["consolidation_candles"]),
-            cmult=round(float(s["consolidation_atr_mult"]), 2),
-            swing=int(s["swing_lookback"]), vsma=int(s["volume_sma_period"]),
-            vmult=round(float(s["volume_mult"]), 2), rr=round(float(s["risk_reward_ratio"]), 2),
-            lev=round(float(r["leverage"]), 1), risk=round(float(r["risk_per_trade_pct"]), 2),
-            alloc=round(float(r["max_position_allocation_pct"]), 1),
-            bb_enabled=str(bool(b["enabled"])).lower(), bb_len=int(b["length"]),
-            bb_std=round(float(b["std"]), 2), bb_minbw=round(float(b["min_bandwidth_pct"]), 2),
-            bb_explb=int(b["expansion_lookback"]),
-            bb_expratio=round(float(b["expansion_min_ratio"]), 2),
-            bb_middist=round(float(b["min_mid_distance"]), 2),
-            ref_dev_ret=m.get("development_return_pct"), ref_dev_pf=m.get("development_pf"),
-            ref_dev_dd=m.get("development_max_dd_pct"), ref_dev_n=m.get("development_trades"),
-            ref_uoff_ret=uo.get("return_pct"), ref_uoff_pf=uo.get("pf"),
-            ref_uoff_dd=uo.get("max_dd_pct"), ref_uoff_n=uo.get("trades"),
-            ref_uon_ret=un.get("return_pct"), ref_uon_pf=un.get("pf"),
-            ref_uon_dd=un.get("max_dd_pct"), ref_uon_n=un.get("trades"),
-        )
-        open(os.path.join(OUT, pinefile), "w").write(src)
-        print(f"  pine/{pinefile}  <- configs/{cfgfile}")
-
-
-if __name__ == "__main__":
-    main()

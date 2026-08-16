@@ -38,5 +38,16 @@
     "commission_pct": 0.05,
     "slippage_ticks": 1,
     "tick_size": 0.01
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": false,
+      "length": 20,
+      "std": 2.0,
+      "min_bandwidth_pct": 0.0,
+      "expansion_lookback": 5,
+      "expansion_min_ratio": 0.0,
+      "min_mid_distance": 0.0
+    }
   }
 }

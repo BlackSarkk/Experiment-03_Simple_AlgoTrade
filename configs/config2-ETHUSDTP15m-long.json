@@ -1,0 +1,88 @@
+{
+  "_name": "ETHUSDT.P 15m — Candidate #158 + Bollinger",
+  "_description": "Candidate #158 strategy/risk/execution values IDENTICAL to config1. The only difference is filters.bollinger.enabled = true, which gates (never creates) 15m LONG signals using the Stage-1 Bollinger chop filter.",
+  "_source": "config1 (frozen Candidate #158) with the Stage-1 Bollinger filter switched on",
+  "_symbol": "ETHUSDT",
+  "_tradingview_symbol": "BINANCE:ETHUSDT.P",
+  "_timeframe": "15m",
+  "_direction": "LONG_ONLY",
+  "_development_start": "2024-07-16",
+  "_development_end": "2026-07-15",
+  "_unseen_start": "2026-07-16",
+  "_unseen_end": "2026-08-15",
+  "_bollinger_optimized": true,
+  "_created_from": "configs/config1-ETHUSDTP15m-long.json",
+  "_optimizer_architecture": "NEW",
+  "_risk_policy": "preset",
+  "_notes": "Metadata is informational only and never affects execution. Config2 differs from config1 ONLY in filters.bollinger.enabled. A rejected Multi-Timeframe (2h EMA300) gate was previously attached to this preset; it was removed along with its Python filter and its Pine block, and is no longer part of the project.",
+  "_reference_metrics": {
+    "development_return_pct": 274.35,
+    "development_pf": 1.296,
+    "development_max_dd_pct": 32.72,
+    "development_trades": 212,
+    "development_return_pct_filter_on": 352.17,
+    "development_pf_filter_on": 1.544,
+    "development_max_dd_pct_filter_on": 35.12,
+    "unseen_filter_off": {
+      "return_pct": 4.85,
+      "pf": 1.319,
+      "max_dd_pct": 8.43,
+      "trades": 10
+    },
+    "unseen_filter_on": {
+      "return_pct": 7.62,
+      "pf": 1.969,
+      "max_dd_pct": 8.43,
+      "trades": 6
+    }
+  },
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 104,
+    "rsi_period": 20,
+    "rsi_overbought": 64.0,
+    "rsi_oversold": 23.0,
+    "atr_period": 7,
+    "consolidation_candles": 7,
+    "consolidation_atr_mult": 2.8,
+    "swing_lookback": 17,
+    "volume_sma_period": 12,
+    "volume_mult": 1.8,
+    "risk_reward_ratio": 3.6,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "leverage": 4.0,
+    "risk_per_trade_pct": 2.6,
+    "max_position_allocation_pct": 70.0,
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": true,
+      "length": 10,
+      "std": 2.3,
+      "min_bandwidth_pct": 0.2,
+      "expansion_lookback": 10,
+      "expansion_min_ratio": 0.9500000000000001,
+      "min_mid_distance": 0.15
+    }
+  },
+  "_candidate": "Candidate #158",
+  "_bollinger_enabled": true,
+  "_research_partitions": {
+    "TRAIN": "2021-01-15..2024-06-30",
+    "VALID": "2024-07-01..2025-11-30",
+    "UNSEEN": "2025-12-01..2026-08-15 (touched once, after selection)"
+  }
+}

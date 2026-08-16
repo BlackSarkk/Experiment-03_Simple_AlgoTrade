@@ -6,7 +6,9 @@ set -e
 # ==============================================================================
 # STRATEGY & PIPELINE CONFIGURATION KNOBS
 # ==============================================================================
-CONFIG_ARG="configs/default.json"
+DEFAULT_CONFIG="configs/default.json"
+CONFIG_ARG="$DEFAULT_CONFIG"
+CONFIG_SUPPLIED=false
 
 EXECUTION_MODE="REFERENCE"               # "REFERENCE" or "REALISTIC"
 
@@ -25,9 +27,85 @@ FORWARD_TEST=${FORWARD_TEST:-false}
 FORWARD_MODE=${FORWARD_MODE:-"PAPER"}
 RESUME_FORWARD_STATE=${RESUME_FORWARD_STATE:-true}
 
+KNOWN_FLAGS=(--backtest --forward-test --historical-replay --robustness
+             --config --reset --hard-reset --clear-cache --reset-cache
+             --clear-cache-only --resume --help)
+
+# ------------------------------------------------------------------
+# Usage — single source of truth (printed by --help and by every error path)
+# ------------------------------------------------------------------
+usage() {
+  cat <<'EOF'
+ETH Strategy Pipeline — rule-based ETHUSDT.P research pipeline
+
+USAGE
+  ./pipeline.sh --config <config-file> <action> [options]
+  ./pipeline.sh <maintenance-action>
+
+ACTIONS (exactly one required; each needs --config)
+  --backtest             Historical backtest        -> results/backtest/
+  --historical-replay    Candle-by-candle replay    -> results/replay/
+  --forward-test         Live paper trading (PAPER) -> results/forward/
+  --robustness           Robustness suite
+
+MAINTENANCE ACTIONS (run alone, exit without executing a stage)
+  --clear-cache          Delete the market-data cache for the active symbol
+                         (alias: --reset-cache)
+  --clear-cache-only     Delete only the cache, nothing else
+  --reset                Delete current runtime results/logs
+  --hard-reset           Delete ALL generated results/logs/cache/archives
+                         (cannot be combined with an action)
+
+OPTIONS
+  --config <file>        Preset to run. Also accepts --config=<file>.
+  --resume               Resume forward state (default for --forward-test)
+  --help, -h             Show this help and exit
+
+CONFIG RESOLUTION
+  --config is tried in this order, first hit wins:
+      <arg>  ->  <arg>.json  ->  configs/<arg>  ->  configs/<arg>.json
+  So these are equivalent:
+      --config config1-ETHUSDTP15m-long.json
+      --config configs/config1-ETHUSDTP15m-long.json
+      --config config1-ETHUSDTP15m-long
+
+EXAMPLES
+  ./pipeline.sh --config config1-ETHUSDTP15m-long.json --backtest
+  ./pipeline.sh --config config2-ETHUSDTP15m-long.json --backtest
+  ./pipeline.sh --config default.json --forward-test
+  ./pipeline.sh --config config1-ETHUSDTP15m-long.json --historical-replay
+  ./pipeline.sh --config default.json --backtest --reset --clear-cache
+  ./pipeline.sh --hard-reset
+EOF
+}
+
+list_configs() {
+  echo "Available configs:"
+  if ls configs/*.json >/dev/null 2>&1; then
+    ls -1 configs/*.json | sed 's|^|  |'
+  else
+    echo "  (none found in configs/)"
+  fi
+}
+
+# Suggest the closest known flag for a typo (prefix match in either direction).
+suggest_flag() {
+  local bad="$1" f
+  for f in "${KNOWN_FLAGS[@]}"; do
+    if [[ "$f" == "$bad"* || "$bad" == "$f"* ]]; then
+      echo "$f"; return 0
+    fi
+  done
+  return 1
+}
+
 # Parse CLI arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --help|-h)
+      usage
+      exit 0
+      ;;
     --clear-cache-only)
       CLEAR_CACHE_ONLY=true
       shift
@@ -84,34 +162,75 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --config)
-      if [[ $# -lt 2 || "$2" == --* ]]; then
-        echo "ERROR: --config requires a config file argument."
-        echo "       e.g. --config config1-ETHUSDTP15m-long.json"
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --config requires a config file argument, but none was given."
+        echo ""
+        list_configs
+        exit 1
+      fi
+      if [[ "$2" == -* ]]; then
+        CONFIG_GUESS=$(printf '%s' "$2" | sed 's/^-*//')
+        echo "ERROR: --config requires a config file argument, but got the flag '$2'."
+        echo ""
+        echo "  You wrote:    --config $2"
+        echo "  Did you mean: --config $CONFIG_GUESS"
+        echo ""
+        echo "  The config file name must not start with '-'."
+        echo ""
+        list_configs
         exit 1
       fi
       CONFIG_ARG="$2"
+      CONFIG_SUPPLIED=true
       shift 2
       ;;
     --config=*)
       CONFIG_ARG="${1#--config=}"
+      CONFIG_SUPPLIED=true
+      if [ -z "$CONFIG_ARG" ]; then
+        echo "ERROR: --config= requires a config file argument (nothing followed the '=')."
+        echo ""
+        list_configs
+        exit 1
+      fi
       shift
       ;;
     *)
       echo "ERROR: Unknown option '$1'"
+      if SUGGESTION=$(suggest_flag "$1"); then
+        echo ""
+        echo "  Did you mean '$SUGGESTION'?"
+      fi
       echo ""
-      echo "Usage:"
-      echo "  ./pipeline.sh --config <config-file> --backtest"
-      echo "  ./pipeline.sh --config <config-file> --forward-test"
-      echo "  ./pipeline.sh --config <config-file> --historical-replay"
-      echo "  ./pipeline.sh --config <config-file> --robustness"
-      echo "  ./pipeline.sh --reset"
-      echo "  ./pipeline.sh --hard-reset"
-      echo "  ./pipeline.sh --clear-cache"
-      echo "  ./pipeline.sh --reset --clear-cache"
+      usage
       exit 1
       ;;
   esac
 done
+
+# ------------------------------------------------------------------
+# Decide the action FIRST, so "no action" is reported before anything
+# config-related is printed.
+# ------------------------------------------------------------------
+MAINTENANCE_ONLY=false
+if [ "$EXECUTION_SUPPLIED" = false ]; then
+  if [ "$HARD_RESET" = true ] || [ "$RESET" = true ] || [ "$CLEAR_CACHE" = true ] || [ "$CLEAR_CACHE_ONLY" = true ]; then
+    MAINTENANCE_ONLY=true
+  else
+    echo "ERROR: No action specified."
+    echo ""
+    echo "  You must pass exactly one action, e.g. --backtest."
+    echo ""
+    usage
+    exit 1
+  fi
+fi
+
+if [ "$HARD_RESET" = true ] && [ "$EXECUTION_SUPPLIED" = true ]; then
+    echo "ERROR: --hard-reset cannot be combined with an action. Run it separately:"
+    echo "         ./pipeline.sh --hard-reset"
+    exit 1
+fi
 
 # ------------------------------------------------------------------
 # Resolve --config to an actual file. Accepted forms:
@@ -124,9 +243,12 @@ done
 
 if [ -z "$CONFIG_PATH" ]; then
   echo "ERROR: Config file not found: '$CONFIG_ARG'"
-  echo "       Looked for: $CONFIG_ARG, $CONFIG_ARG.json, configs/$CONFIG_ARG, configs/$CONFIG_ARG.json"
-  echo "       Available configs:"
-  ls -1 configs/*.json 2>/dev/null | sed 's|^|         |' || echo "         (none)"
+  echo "       Looked for, in order:"
+  for cand in "$CONFIG_ARG" "$CONFIG_ARG.json" "configs/$CONFIG_ARG" "configs/$CONFIG_ARG.json"; do
+    echo "         - $cand"
+  done
+  echo ""
+  list_configs
   exit 1
 fi
 
@@ -171,55 +293,39 @@ then
   exit 1
 fi
 
+if [ "$CONFIG_SUPPLIED" = false ]; then
+  echo "NOTE: no --config given; falling back to the default preset."
+fi
 echo "Config: $CONFIG_PATH"
 
-MAINTENANCE_ONLY=false
-if [ "$EXECUTION_SUPPLIED" = false ]; then
-  if [ "$HARD_RESET" = true ] || [ "$RESET" = true ] || [ "$CLEAR_CACHE" = true ] || [ "$CLEAR_CACHE_ONLY" = true ]; then
-    MAINTENANCE_ONLY=true
-  else
-    echo "ERROR: No action specified."
-    echo ""
-    echo "Usage:"
-    echo "  ./pipeline.sh --config <config-file> --backtest"
-    echo "  ./pipeline.sh --config <config-file> --forward-test"
-    echo "  ./pipeline.sh --config <config-file> --historical-replay"
-    echo "  ./pipeline.sh --config <config-file> --robustness"
-    echo "  ./pipeline.sh --reset"
-    echo "  ./pipeline.sh --hard-reset"
-    echo "  ./pipeline.sh --clear-cache"
-    echo "  ./pipeline.sh --reset --clear-cache"
-    exit 1
-  fi
-fi
-
-if [ "$HARD_RESET" = true ] && [ "$EXECUTION_SUPPLIED" = true ]; then
-    echo "ERROR: --hard-reset cannot be combined with execution modes. Run it separately."
-    exit 1
-fi
-
-# Build Python execution string
-CMD=".venv/bin/python3 src/main.py --config-preset "$CONFIG_PATH" --forward-mode $FORWARD_MODE --execution-mode $EXECUTION_MODE"
+# ------------------------------------------------------------------
+# Build the Python command as an ARRAY (no eval): paths containing spaces or
+# shell metacharacters are passed through safely as single arguments.
+# ------------------------------------------------------------------
+CMD=(.venv/bin/python3 src/main.py
+     --config-preset "$CONFIG_PATH"
+     --forward-mode "$FORWARD_MODE"
+     --execution-mode "$EXECUTION_MODE")
 
 if [ "$HARD_RESET" = true ]; then
-  CMD="$CMD --hard-reset --maintenance-only"
+  CMD+=(--hard-reset --maintenance-only)
 elif [ "$MAINTENANCE_ONLY" = true ]; then
-  CMD="$CMD --maintenance-only"
-  if [ "$RESET" = true ]; then CMD="$CMD --reset"; fi
-  if [ "$CLEAR_CACHE" = true ] || [ "$CLEAR_CACHE_ONLY" = true ]; then CMD="$CMD --clear-cache"; fi
+  CMD+=(--maintenance-only)
+  if [ "$RESET" = true ]; then CMD+=(--reset); fi
+  if [ "$CLEAR_CACHE" = true ] || [ "$CLEAR_CACHE_ONLY" = true ]; then CMD+=(--clear-cache); fi
 elif [ "$FORWARD_TEST" = true ]; then
-  CMD="$CMD --forward-test"
-  if [ "$RESET" = true ]; then CMD="$CMD --reset"; fi
-  if [ "$CLEAR_CACHE" = true ]; then CMD="$CMD --clear-cache"; fi
-  if [ "$RESUME_FORWARD_STATE" = true ] && [ "$RESET" = false ]; then CMD="$CMD --resume"; fi
+  CMD+=(--forward-test)
+  if [ "$RESET" = true ]; then CMD+=(--reset); fi
+  if [ "$CLEAR_CACHE" = true ]; then CMD+=(--clear-cache); fi
+  if [ "$RESUME_FORWARD_STATE" = true ] && [ "$RESET" = false ]; then CMD+=(--resume); fi
 elif [ "$ROBUSTNESS" = true ]; then
-  CMD="$CMD --robustness"
-  if [ "$RESET" = true ]; then CMD="$CMD --reset"; fi
-  if [ "$CLEAR_CACHE" = true ]; then CMD="$CMD --clear-cache"; fi
+  CMD+=(--robustness)
+  if [ "$RESET" = true ]; then CMD+=(--reset); fi
+  if [ "$CLEAR_CACHE" = true ]; then CMD+=(--clear-cache); fi
 else
-  CMD="$CMD --backtest"
-  if [ "$RESET" = true ]; then CMD="$CMD --reset"; fi
-  if [ "$CLEAR_CACHE" = true ]; then CMD="$CMD --clear-cache"; fi
+  CMD+=(--backtest)
+  if [ "$RESET" = true ]; then CMD+=(--reset); fi
+  if [ "$CLEAR_CACHE" = true ]; then CMD+=(--clear-cache); fi
 fi
 
-eval $CMD
+"${CMD[@]}"

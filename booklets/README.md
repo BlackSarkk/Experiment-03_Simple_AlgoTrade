@@ -14,16 +14,30 @@ Python is the source of truth; a TradingView Pine port mirrors it for chart vali
 
 ## Current frozen reference
 
-| | Path |
-|---|---|
-| Active config | `configs/config1-ETHUSDTP15m-long.json` |
-| Active Pine | `pine/config1-ETHUSDTP15m-long.pine` |
-| Active risk policy | `src/risk_management/riskmanager.json` |
-| Baseline preset | `configs/default.json` |
+| Preset | Pine | What it is |
+|---|---|---|
+| `configs/config1-ETHUSDTP15m-long.json` | `pine/config1-ETHUSDTP15m-long.pine` | **Frozen baseline** — Candidate #158, Bollinger OFF |
+| `configs/config2-ETHUSDTP15m-long.json` | `pine/config2-ETHUSDTP15m-long.pine` | Same Candidate #158 values, Bollinger ON |
+| `configs/default.json` | — | shared-risk-policy baseline preset |
+
+There is no Config3. A Multi-Timeframe (2h EMA300) gate was trialled as Config2/Config3 and
+**rejected**; its Python filter, configs and Pine block have been removed. See
+[§ Rejected experiments](#rejected-experiments).
+
+Active risk policy: `src/risk_management/riskmanager.json`
 
 Frozen candidate: **Candidate #158** — EMA 104 / RSI 20 / OB 64 / OS 23 / ATR 7 /
 consolidation 7 @ 2.8 ATR / swing 17 / vol SMA 12 @ 1.8x / RR 3.6,
-leverage 4.0x, risk 2.6%, allocation 70%, Bollinger stored but `enabled: false`.
+leverage 4.0x, risk 2.6%, allocation 70%.
+Config1 and Config2 share these values exactly; they differ **only** in
+`filters.bollinger.enabled`.
+
+UNSEEN reference (2025-12-01 → 2026-08-15, $10,000 start):
+
+| | Return | PF | Max DD | Trades |
+|---|---|---|---|---|
+| Config1 (Bollinger OFF) | +38.57% | 1.257 | 29.67% | 73 |
+| **Config2** (Bollinger ON) | +80.50% | 1.681 | 16.33% | 53 |
 
 ## Running it
 
@@ -44,7 +58,33 @@ One generic interface — no aliases, no numbered presets:
 |---|---|
 | `src/risk_management/backup/` | pre-Phase-2 RiskManager (reference only, never imported) |
 | `src/optimization/backup/` | legacy Candidate #5-era optimizer (reference only) |
-| `backups/` | archives produced by `booklets/rebuild_project.sh` |
+| `backups/` | archives produced by `booklets/rebuild_project.sh` (created on first run) |
+
+Nothing under a `backup/` directory is ever imported by production code. Verify with:
+
+```bash
+grep -rn "backup" src/ --include=*.py | grep -v "^src/.*/backup/"
+```
+
+<a name="rejected-experiments"></a>
+## Rejected experiments (historical — NOT production)
+
+Kept so the same ground is not re-broken. None of this is active functionality.
+
+| Experiment | Status | Trace left in the repo |
+|---|---|---|
+| **MTF 2h EMA300 gate** (Config2 strict / Config3 relaxed 0.50%) | **Rejected and removed** — did not work properly in practice | none in production code, configs or Pine |
+| **ADX filter** | Never ported to Python | inert `input.bool(false, …)` toggle in both Pine files only |
+| **Candidate #5** | Superseded by Candidate #158 | `src/optimization/backup/` |
+
+The MTF removal deleted `src/filters/stage_2_mtf/`, `configs/config3-*` and `pine/config3-*`.
+Because the shared `MaskedStrategy` wrapper had been placed *inside* that MTF package, its
+deletion also broke the Bollinger path and every `main.py` import; the wrapper now lives at
+`src/filters/masked_strategy.py`, independent of any single filter.
+
+Historical MTF-era measurements (Config2 +72.12% PF 2.534, Config3 +83.87% PF 2.530 on
+2025-12-01 → 2026-08-15) describe code that no longer exists and must not be compared
+against current Config1/Config2 results.
 
 ## How to start reading
 

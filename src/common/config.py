@@ -114,6 +114,7 @@ class PipelineConfig:
     # Reset & Cache Controls (Defaults must always be False for safety!)
     hard_reset: bool = False                # Complete destruction of all generated files
     risk_policy_source: str = ""       # Provenance of the active risk policy (set at load)
+    filters: dict = field(default_factory=dict)   # signal-filter blocks from the preset
     reset: bool = False                     # Stage-scoped reset
     clear_cache: bool = False               # Market data cache deletion ONLY
     reset_cache: bool = False               # Alias for clear_cache

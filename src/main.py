@@ -22,6 +22,9 @@ from backtest.metrics import BacktestMetrics
 from backtest.reports import BacktestExporter
 from backtest.robustness import RobustnessEvaluator
 from forward_test.paper_engine import PaperForwardEngine
+from filters.stage_1_bollinger.filter import (BollingerFilterConfig, compute_bollinger,
+                                              allow_mask as bb_allow_mask)
+from filters.masked_strategy import MaskedStrategy
 from common.utils import setup_logger, format_currency, format_percent
 
 logger = setup_logger("Main")
@@ -115,6 +118,26 @@ def print_effective_strategy_configuration(cfg: PipelineConfig):
     print(f"  Commission (Taker Fee)      : {cfg.execution.taker_fee_pct * 100.0:.4f}%")
     print(f"  Slippage (Ticks)            : {cfg.execution.slippage_ticks}")
     print("=" * 80 + "\n")
+
+
+def evaluation_mask(df, platform_cfg):
+    """Boolean mask of rows inside the requested evaluation window (same rule as
+    slice_evaluation_window). Exposed so signal-filter masks computed on the FULL
+    frame can be sliced identically — filters need pre-window warmup just like
+    indicators do."""
+    import pandas as pd
+    if df.empty or "datetime" not in df.columns:
+        return pd.Series(True, index=df.index)
+    dt = pd.to_datetime(df["datetime"], utc=True)
+    mask = pd.Series(True, index=df.index)
+    if platform_cfg.start_date:
+        mask &= (dt >= pd.Timestamp(platform_cfg.start_date, tz="UTC"))
+    if platform_cfg.end_date:
+        req_end = pd.Timestamp(platform_cfg.end_date, tz="UTC")
+        if len(str(platform_cfg.end_date)) == 10:
+            req_end = req_end + pd.Timedelta(hours=23, minutes=59, seconds=59)
+        mask &= (dt <= req_end)
+    return mask
 
 
 def slice_evaluation_window(df, platform_cfg):
@@ -256,15 +279,49 @@ def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False, maintenanc
     df_indicators = compute_all_indicators(df_raw, cfg.strategy)
     logger.info(f"Indicators attached to {len(df_indicators)} candles (full cache incl. warmup).")
 
-    # 2b. Strict evaluation-window slicing.
+    # 2b. Signal-filter masks are computed on the FULL indicator frame (pre-slice) so
+    #     that filter indicators get the same pre-window warmup the strategy indicators
+    #     get. Computing a filter on the sliced frame would restart its rolling windows
+    #     at the window edge and change which signals are blocked.
+    bb_cfg = BollingerFilterConfig.from_dict(cfg.filters.get("bollinger"))
+    _filter_mask_full = None
+    if bb_cfg.enabled:
+        import numpy as _np
+        _filter_mask_full = _np.ones(len(df_indicators), dtype=bool)
+        _active = []
+        _filter_mask_full &= bb_allow_mask(compute_bollinger(df_indicators, bb_cfg), bb_cfg)
+        _active.append(f"bollinger(len={bb_cfg.length}, std={bb_cfg.std})")
+        print("=" * 60)
+        print(" ACTIVE SIGNAL FILTERS  (computed on full history, then window-sliced)")
+        for a in _active:
+            print(f"   - {a}")
+        print("=" * 60)
+    else:
+        logger.info("Signal filters: none enabled (baseline signal set).")
+
+    # 2c. Strict evaluation-window slicing.
     #     The cache MAY be wider than the requested range; the evaluation window MAY NOT.
+    _eval_mask = evaluation_mask(df_indicators, cfg.platform)
+    if _filter_mask_full is not None:
+        _filter_mask = _filter_mask_full[_eval_mask.to_numpy()]
+    else:
+        _filter_mask = None
     df_indicators = slice_evaluation_window(df_indicators, cfg.platform)
+
+    def _apply_filters(engine):
+        """Inject the precomputed filter mask. Engine/strategy source is never modified."""
+        if _filter_mask is not None:
+            engine.strategy = MaskedStrategy(cfg.strategy, _filter_mask)
+        return engine
 
     # 3. Backtest Execution
     if cfg.run_backtest and not cfg.run_robustness and not cfg.run_forward_test:
         logger.info(f"Executing Backtest Engine in {cfg.execution_mode} Mode...")
-        engine = BacktestEngine(cfg)
+        engine = _apply_filters(BacktestEngine(cfg))
         res = engine.run(df_indicators)
+        _st = getattr(engine.strategy, "blocked_count", 0)
+        if _st:
+            logger.info(f"Signal filters blocked {_st} signals")
 
         metrics = BacktestMetrics.calculate(
             trades=res["trades"],
@@ -440,6 +497,9 @@ def main():
     cfg.execution.slippage_pct = e_data.get("slippage_pct", 0.03) / 100.0
     cfg.execution.slippage_ticks = e_data.get("slippage_ticks", 1.0)
     cfg.execution.tick_size = e_data.get("tick_size", 0.01)
+
+    # Signal-filter blocks (removal-only gates). Absent block == disabled.
+    cfg.filters = preset_data.get("filters", {}) or {}
 
     # Startup display
     print("============================================================")

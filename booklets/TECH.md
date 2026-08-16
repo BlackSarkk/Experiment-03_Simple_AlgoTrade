@@ -11,8 +11,9 @@ No secrets, credentials or machine-specific data are recorded here.
 |---|---|
 | Symbol | `ETHUSDT` (Binance USD-M perpetual; TradingView `BINANCE:ETHUSDT.P`) |
 | Timeframe | `15m` |
-| Active config | `configs/config1-ETHUSDTP15m-long.json` |
-| Active Pine | `pine/config1-ETHUSDTP15m-long.pine` |
+| Frozen baseline config | `configs/config1-ETHUSDTP15m-long.json` (Bollinger OFF) |
+| Filtered variant | `config2-…` (Bollinger ON; identical in every other value) |
+| Pine ports | `pine/config1/2-ETHUSDTP15m-long.pine` (both from `tools/generate_pine.py`; config1 PROTECTED) |
 | Direction | `long_enabled: true`, `short_enabled: false` |
 | Active risk policy | `src/risk_management/riskmanager.json` |
 | RiskManager code | `src/risk_management/baseline.py` (`BaselineRiskManager`) |
@@ -98,10 +99,12 @@ Dates: `preset["start_date"] / ["end_date"]`, else `2024-01-01 / 2026-08-15`.
 PAPER forward instead uses a rolling window (`days=60`, dates `None`).
 
 **Fields main.py reads:** `symbol, platform, timeframe, strategy.*, risk.*, execution.*,
-start_date, end_date, _risk_policy`.
-**Fields main.py IGNORES:** `filters.*`, `strategy.use_trend_filter`,
-`strategy.trend_ema_period`, `strategy.use_ema_slope_filter`, `bollinger` (legacy key).
-Adding such a key to a preset changes nothing until `main.py` is wired.
+start_date, end_date, _risk_policy, filters.bollinger.*`.
+**Fields main.py STILL IGNORES:** `strategy.use_trend_filter`, `strategy.trend_ema_period`,
+`strategy.use_ema_slope_filter`, legacy top-level `bollinger`.
+
+`filters.bollinger` is the only filter block main.py reads. Any other key under `filters`
+is ignored — it is NOT wired up merely by being present in the JSON.
 
 ---
 
@@ -144,11 +147,20 @@ differs slightly from Binance REST klines.
 a separate directory and inject behaviour via `engine.strategy`; never overwrite the
 frozen config/Pine — create a new `configN-*` pair instead.
 
-**Adding a filter:** create `src/filters/<stage>/filter.py` exposing a
-`BaselineStrategy` subclass that calls `super().generate_signals()` and only *removes*
-signals. A filter must never create a signal or alter prices/sizing. Add its parameters
-under `filters.<name>` in the preset **and** wire them in `main.py`, otherwise they are
-inert.
+**Adding a filter:** create `src/filters/<stage>/filter.py` exposing an `allow_mask(df, cfg)`
+returning a boolean array. Add parameters under `filters.<name>` in the preset **and** wire
+them in `main.py` §2b — compute the mask on the FULL frame, AND it into `_filter_mask_full`,
+then let the existing slicing handle warmup. Never compute a filter mask on the sliced frame.
+Reuse `MaskedStrategy` (`src/filters/masked_strategy.py`) to apply the combined mask; it is
+filter-agnostic, so do **not** put a shared wrapper inside your own stage package — that is
+what coupled Bollinger to the since-deleted MTF stage and broke every run when MTF was
+removed. For any higher-timeframe data, provide an `assert_no_lookahead()` and call it
+before use.
+
+**Pine regeneration:** `tools/generate_pine.py` renders both config1 and config2 from one
+shared `TEMPLATE`; the only difference it injects is `filters.bollinger.enabled`. `PROTECTED`
+contains **only** `config1-…​.pine` (the frozen baseline), so config1 is never overwritten
+while config2 regenerates idempotently. Verify with a diff before and after if in doubt.
 
 **Adding a config:** drop a new JSON into `configs/` with the full schema
 (`platform, symbol, timeframe, strategy, risk, execution, filters`) and add
@@ -212,7 +224,8 @@ Running `tests/unit` triggers a 3h market-data download; delete
 | `backtest/engine.py` | `BacktestEngine`, `TradeRecord` |
 | `forward_test/replay_engine.py` | `HistoricalReplayEngine` |
 | `forward_test/paper_engine.py` | `PaperForwardEngine` |
-| `filters/stage_1_bollinger/filter.py` | `BollingerFilterConfig`, `BollingerFilteredStrategy` |
+| `filters/stage_1_bollinger/filter.py` | `BollingerFilterConfig`, `compute_bollinger`, `allow_mask`, `BollingerFilteredStrategy` |
+| `filters/masked_strategy.py` | `MaskedStrategy` — generic precomputed-mask gate, filter-agnostic |
 
 **Preset schema**
 ```json
@@ -255,7 +268,9 @@ Replay/forward `trades.csv` uses `sl_price`/`tp_price`/`commission` instead of
 `<action>` ∈ `--backtest | --historical-replay | --forward-test | --robustness`.
 Always pass `--config` explicitly; never assume a default preset.
 Resolution order: `<arg>` → `<arg>.json` → `configs/<arg>` → `configs/<arg>.json`.
-Exit codes: bare invocation → usage + 1; unknown flag → 1; `--config` without a value → 1;
+Exit codes: `--help` / `-h` → full usage + **0**; bare invocation → usage + 1;
+unknown flag → 1 (with a "did you mean" suggestion when the typo prefix-matches a known
+flag); `--config` without a value → 1;
 missing file → 1 (lists available configs); malformed JSON → 1; schema-invalid → 1
 (lists every missing field); `--hard-reset` + stage → 1; maintenance-only actions → 0.
 
@@ -263,8 +278,12 @@ missing file → 1 (lists available configs); malformed JSON → 1; schema-inval
 
 ## 8. Open defects (verified)
 
-1. `main.py` ignores `filters.*` and `use_trend_filter` / `trend_ema_period`, so the
-   Bollinger filter and any regime filter are inert via the CLI.
+1. `main.py` ignores `use_trend_filter` / `trend_ema_period` / `use_ema_slope_filter`, so a
+   regime filter cannot be enabled from preset JSON. (`filters.bollinger` **is** wired and
+   verified working — config2 blocks 357 signals on 2024-01-01..2026-08-15.)
 2. `--reset` deletes forward artifacts **before** `archive_previous_experiment()` runs,
    so `--forward-test --reset` discards instead of archiving.
 3. `tests/unit/test_engine.py::test_leverage_1_vs_3_5_risk_budget` tolerance too tight.
+4. `pine/config1-ETHUSDTP15m-long.pine` line 5 names its source as
+   `configs/config1-ETHUSDTP15m.json` (missing `-long`). Cosmetic comment typo only; the
+   file is PROTECTED and was deliberately left untouched.

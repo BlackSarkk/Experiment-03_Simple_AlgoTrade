@@ -671,6 +671,281 @@ class PaperForwardEngine:
         df_new = pd.concat([df, df_row], ignore_index=True)
         df_new.to_csv(self.tracker_path, index=False)
 
+    # --- CPU temperature sensor discovery -------------------------------------------
+    # No machine-specific configuration: every thermal sensor the host exposes is
+    # enumerated at runtime and scored, so this works unchanged on a different CPU,
+    # vendor or architecture. The tokens below are SENSOR-NAMING CONVENTIONS shared
+    # across drivers (Intel coretemp -> "Package id 0", AMD k10temp -> "Tctl"/"Tdie",
+    # ARM -> "cpu_thermal"), not the name of any particular machine's chip.
+    _CPU_TOKENS = ("cpu", "core", "package", "tctl", "tdie", "ccd", "processor", "soc")
+    # Device classes that also publish temperatures but are never the CPU die. Without
+    # these, a host can hand back a real-but-wrong number (an NVMe or GPU reading).
+    _NON_CPU_TOKENS = (
+        "nvme", "ssd", "disk", "hdd", "sata", "drive", "gpu", "vga", "amdgpu", "nouveau",
+        "radeon", "edge", "junction", "wifi", "wlan", "iwl", "eth", "lan", "nic", "r8169",
+        "bat", "battery", "ambient", "chipset", "pch", "vrm", "board", "wmi", "mem",
+    )
+    # Chassis/ambient probe: real, but usually far below the die. Last resort only.
+    _WEAK_CPU_TOKENS = ("acpitz", "thermal_zone")
+
+    # Optional explicit override for unusual hosts, e.g.
+    #   ALGO_CPU_TEMP_SENSOR=k10temp            (match a chip or label substring)
+    #   ALGO_CPU_TEMP_SENSOR=/sys/class/hwmon/hwmon3/temp1_input   (exact sysfs path)
+    CPU_TEMP_SENSOR_ENV = "ALGO_CPU_TEMP_SENSOR"
+
+    # Minimum wall-clock gap between host-CPU samples (see _read_system_metrics).
+    CPU_SAMPLE_MIN_SEC = 1.0
+    # Re-run sensor discovery at most this often when nothing has been found yet.
+    SENSOR_RESCAN_SEC = 30.0
+
+    @classmethod
+    def _score_sensor(cls, chip: str, label: str, has_limit: bool) -> int:
+        """Rank a discovered thermal sensor by how likely it is to be the CPU die.
+
+        Generic and vendor-neutral: scores the sensor's own advertised chip/label text,
+        so an unseen machine is classified by the same rules with no configuration.
+        """
+        chip_l = (chip or "").strip().lower()
+        label_l = (label or "").strip().lower()
+        blob = f"{chip_l} {label_l}"
+
+        # Definitely-not-CPU devices are rejected outright.
+        if any(tok in blob for tok in cls._NON_CPU_TOKENS):
+            return -1
+
+        score = 0
+        if any(tok in label_l for tok in cls._CPU_TOKENS):
+            score += 200          # an explicit label such as "Package id 0" / "Tctl"
+        elif any(tok in chip_l for tok in cls._CPU_TOKENS):
+            score += 100          # chip name such as "coretemp" / "cpu_thermal"
+        elif any(tok in blob for tok in cls._WEAK_CPU_TOKENS):
+            score += 10           # ambient/chassis probe: better than nothing
+        if has_limit:
+            score += 5            # CPU sensors normally publish high/critical limits
+        return score
+
+    def _discover_cpu_temp_sensor(self) -> Optional[Dict[str, Any]]:
+        """Enumerate every thermal sensor on the host and return the best CPU candidate.
+
+        Returns {"read": callable -> float|None, "source": str} or None. Nothing about a
+        specific machine is assumed; discovery re-runs if the chosen sensor disappears.
+        """
+        override = os.environ.get(self.CPU_TEMP_SENSOR_ENV, "").strip()
+        candidates = []   # (score, source, reader)
+
+        # --- Linux sysfs hwmon (works with no third-party dependency) ---
+        base = "/sys/class/hwmon"
+        try:
+            for entry in sorted(os.listdir(base)):
+                hw = os.path.join(base, entry)
+                try:
+                    with open(os.path.join(hw, "name")) as fh:
+                        chip = fh.read().strip()
+                except OSError:
+                    chip = entry
+                try:
+                    files = sorted(f for f in os.listdir(hw)
+                                   if f.startswith("temp") and f.endswith("_input"))
+                except OSError:
+                    continue
+                for f in files:
+                    path = os.path.join(hw, f)
+                    stem = path[:-len("_input")]
+                    label = ""
+                    try:
+                        with open(stem + "_label") as lh:
+                            label = lh.read().strip()
+                    except OSError:
+                        pass
+                    has_limit = os.path.exists(stem + "_crit") or os.path.exists(stem + "_max")
+                    score = self._score_sensor(chip, label, has_limit)
+                    if override:
+                        if override == path or override.lower() in f"{chip} {label}".lower():
+                            score = 10_000
+                        elif score < 0:
+                            continue
+                    if score < 0:
+                        continue
+
+                    def _read(p=path):
+                        try:
+                            with open(p) as th:
+                                return int(th.read().strip()) / 1000.0
+                        except (OSError, ValueError):
+                            return None
+
+                    candidates.append((score, f"{chip}/{label or f}", _read))
+        except OSError:
+            pass
+
+        # --- Linux thermal zones (some platforms only expose these) ---
+        try:
+            tbase = "/sys/class/thermal"
+            for entry in sorted(os.listdir(tbase)):
+                if not entry.startswith("thermal_zone"):
+                    continue
+                zdir = os.path.join(tbase, entry)
+                try:
+                    with open(os.path.join(zdir, "type")) as fh:
+                        ztype = fh.read().strip()
+                except OSError:
+                    continue
+                path = os.path.join(zdir, "temp")
+                score = self._score_sensor(ztype, "", False)
+                if override and (override == path or override.lower() in ztype.lower()):
+                    score = 10_000
+                if score <= 0:
+                    continue
+
+                def _read(p=path):
+                    try:
+                        with open(p) as th:
+                            return int(th.read().strip()) / 1000.0
+                    except (OSError, ValueError):
+                        return None
+
+                candidates.append((score, f"{ztype}/{entry}", _read))
+        except OSError:
+            pass
+
+        # --- psutil (portable; covers platforms without sysfs) ---
+        try:
+            import psutil
+            fn = getattr(psutil, "sensors_temperatures", None)
+            for chip, entries in ((fn() or {}) if fn else {}).items():
+                for idx, e in enumerate(entries or []):
+                    has_limit = bool(getattr(e, "critical", None) or getattr(e, "high", None))
+                    score = self._score_sensor(str(chip), e.label or "", has_limit)
+                    if override and override.lower() in f"{chip} {e.label or ''}".lower():
+                        score = 10_000
+                    if score <= 0:
+                        continue
+
+                    def _read(c=chip, i=idx):
+                        try:
+                            cur = (psutil.sensors_temperatures() or {}).get(c) or []
+                            return float(cur[i].current) if i < len(cur) else None
+                        except Exception:
+                            return None
+
+                    candidates.append((score, f"{chip}/{e.label or idx}", _read))
+        except Exception:
+            pass
+
+        if not candidates:
+            return None
+        # Highest score wins; ties resolve to the first discovered for stability.
+        score, source, reader = max(candidates, key=lambda c: c[0])
+        return {"read": reader, "source": source, "score": score}
+
+    def _read_cpu_temp_c(self) -> Optional[float]:
+        """CPU temperature in Celsius from an auto-discovered sensor, or None."""
+        sensor = getattr(self, "_cpu_temp_sensor", None)
+        if sensor is not None:
+            val = sensor["read"]()
+            if val is not None:
+                return val
+            self._cpu_temp_sensor = None      # sensor vanished (hotplug/suspend) -> rescan
+
+        now_mono = time.monotonic()
+        if now_mono - getattr(self, "_last_sensor_scan", 0.0) < self.SENSOR_RESCAN_SEC:
+            return None
+        self._last_sensor_scan = now_mono
+
+        sensor = self._discover_cpu_temp_sensor()
+        if sensor is None:
+            return None
+        self._cpu_temp_sensor = sensor
+        if getattr(self, "_logged_sensor", None) != sensor["source"]:
+            self._logged_sensor = sensor["source"]
+            logger.info(f"CPU temperature sensor auto-detected: {sensor['source']} "
+                        f"(score {sensor['score']})")
+        return sensor["read"]()
+
+    def _read_system_metrics(self) -> Dict[str, Any]:
+        """Host CPU / RAM / Disk utilisation and CPU temperature.
+
+        Values are HOST-WIDE (what "consumption" means to someone watching the machine),
+        not per-process. Every field degrades to None + "n/a" when it cannot be read —
+        it must never fall back to a hardcoded number, because a plausible-looking
+        constant is indistinguishable from a real reading and hides the failure.
+        """
+        cpu_pct = ram_pct = disk_pct = None
+
+        # --- CPU: host-wide utilisation ---
+        try:
+            import psutil
+            cpu_pct = float(psutil.cpu_percent(interval=None))
+        except Exception:
+            # /proc/stat delta (no dependency, non-blocking). The dashboard refreshes far
+            # faster than the kernel's tick resolution, so sampling every frame yields
+            # noise (0% / 50% swings) from one- or two-jiffy windows. Resample at most
+            # every CPU_SAMPLE_MIN_SEC and hold the last real reading in between.
+            try:
+                now_mono = time.monotonic()
+                prev = getattr(self, "_prev_cpu_sample", None)
+                last_t = getattr(self, "_prev_cpu_time", 0.0)
+                if prev is not None and (now_mono - last_t) < self.CPU_SAMPLE_MIN_SEC:
+                    cpu_pct = getattr(self, "_last_cpu_pct", None)
+                else:
+                    with open("/proc/stat") as fh:
+                        parts = [float(x) for x in fh.readline().split()[1:]]
+                    idle = parts[3] + (parts[4] if len(parts) > 4 else 0.0)
+                    total = sum(parts)
+                    self._prev_cpu_sample = (total, idle)
+                    self._prev_cpu_time = now_mono
+                    if prev and total > prev[0]:
+                        d_total = total - prev[0]
+                        d_idle = idle - prev[1]
+                        cpu_pct = max(0.0, min(100.0, (1.0 - d_idle / d_total) * 100.0))
+                        self._last_cpu_pct = cpu_pct
+                    else:
+                        cpu_pct = getattr(self, "_last_cpu_pct", None)
+            except Exception:
+                cpu_pct = None
+
+        # --- RAM: host-wide used ---
+        try:
+            import psutil
+            ram_pct = float(psutil.virtual_memory().percent)
+        except Exception:
+            try:
+                info = {}
+                with open("/proc/meminfo") as fh:
+                    for line in fh:
+                        k, _, v = line.partition(":")
+                        info[k.strip()] = float(v.split()[0])
+                total_kb = info.get("MemTotal", 0.0)
+                avail_kb = info.get("MemAvailable")
+                if avail_kb is None:
+                    avail_kb = info.get("MemFree", 0.0) + info.get("Cached", 0.0)
+                if total_kb > 0:
+                    ram_pct = max(0.0, min(100.0, (1.0 - avail_kb / total_kb) * 100.0))
+            except Exception:
+                ram_pct = None
+
+        # --- Disk: root filesystem ---
+        try:
+            import shutil
+            du = shutil.disk_usage("/")
+            if du.total > 0:
+                disk_pct = (du.used / du.total) * 100.0
+        except Exception:
+            disk_pct = None
+
+        cpu_temp_c = self._read_cpu_temp_c()
+
+        return {
+            "cpu_pct": round(cpu_pct, 1) if cpu_pct is not None else None,
+            "ram_pct": round(ram_pct, 1) if ram_pct is not None else None,
+            "disk_pct": round(disk_pct, 1) if disk_pct is not None else None,
+            "cpu_temp_c": round(cpu_temp_c, 1) if cpu_temp_c is not None else None,
+            "cpu_str": f"{cpu_pct:.1f}%" if cpu_pct is not None else "n/a",
+            "ram_str": f"{ram_pct:.1f}%" if ram_pct is not None else "n/a",
+            "disk_str": f"{disk_pct:.1f}%" if disk_pct is not None else "n/a",
+            "temp_str": f"{cpu_temp_c:.0f}°C" if cpu_temp_c is not None else "n/a",
+        }
+
     def build_dashboard_state(self) -> Dict[str, Any]:
         c_price = self.feed.current_price or 0.0
         now_dt = datetime.now(timezone.utc)
@@ -690,33 +965,17 @@ class PaperForwardEngine:
         up_mins, _ = divmod(up_rem, 60)
         uptime_str = f"{up_days}d {up_hrs:02d}h {up_mins:02d}m"
 
-        # System resources (Lightweight, non-blocking process & filesystem stats)
-        try:
-            import os
-            import psutil
-            if not hasattr(self, "_proc") or self._proc is None:
-                self._proc = psutil.Process(os.getpid())
-                self._proc.cpu_percent(interval=None)
-
-            raw_cpu = self._proc.cpu_percent(interval=None)
-            num_cpus = psutil.cpu_count() or 1
-            cpu_usage_pct = max(0.1, round(raw_cpu / num_cpus, 1))
-
-            mem_info = self._proc.memory_info()
-            ram_mb = mem_info.rss / (1024 * 1024)
-            total_ram = psutil.virtual_memory().total
-            ram_usage_pct = round((mem_info.rss / total_ram) * 100.0, 1)
-
-            disk = psutil.disk_usage("/")
-            disk_usage_pct = round(disk.percent, 1)
-            disk_used_gb = disk.used / (1024 ** 3)
-
-            cpu_usage_str = f"{cpu_usage_pct:.1f}%"
-            ram_usage_str = f"{ram_usage_pct:.1f}% ({ram_mb:.0f} MB)"
-            disk_usage_str = f"{disk_usage_pct:.1f}%"
-        except Exception:
-            cpu_usage_pct, ram_usage_pct, disk_usage_pct = 0.1, 0.1, 0.1
-            cpu_usage_str, ram_usage_str, disk_usage_str = "0.1%", "0.1% (0 MB)", "0.1%"
+        # System resources — host-wide CPU / RAM / Disk plus CPU temperature.
+        # Anything unreadable reports "n/a"; this must never invent a plausible number.
+        _sys = self._read_system_metrics()
+        cpu_usage_pct = _sys["cpu_pct"]
+        ram_usage_pct = _sys["ram_pct"]
+        disk_usage_pct = _sys["disk_pct"]
+        cpu_temp_c = _sys["cpu_temp_c"]
+        cpu_usage_str = _sys["cpu_str"]
+        ram_usage_str = _sys["ram_str"]
+        disk_usage_str = _sys["disk_str"]
+        cpu_temp_str = _sys["temp_str"]
 
         # Open PnL & Position update
         unrealized = 0.0
@@ -821,8 +1080,11 @@ class PaperForwardEngine:
                 "exit_time_ist": x_str,
                 "entry_price": t.get("entry_price", 0.0),
                 "exit_price": t.get("exit_price", 0.0),
-                "size": t.get("size", 0.0),
-                "notional": t.get("nominal_value", 0.0),
+                # Completed-trade records store these as "quantity"/"notional" (see
+                # TRADE_COLUMNS), both when appended live and when restored from CSV.
+                # The legacy "size"/"nominal_value" keys are kept as fallbacks only.
+                "size": t.get("quantity", t.get("size", 0.0)),
+                "notional": t.get("notional", t.get("nominal_value", 0.0)),
                 "net_pnl": t.get("net_pnl", 0.0),
                 "net_return_pct": t.get("net_return_pct", t.get("return_pct", 0.0)),
                 "exit_reason": t.get("exit_reason", "N/A")
@@ -1057,24 +1319,29 @@ class PaperForwardEngine:
                 sell_rsi += 10.0
 
             # 3. Trend & Slope Alignment
+            # A DISABLED filter must be neutral, not a free win for one side. The previous
+            # `if not use_trend or <bullish>` short-circuited to the bullish branch
+            # whenever the filter was off — and both of these filters are permanently off
+            # (main.py never reads them from preset JSON), so BUY collected an
+            # unconditional +25 that SELL could never earn and the panel read ~65% BUY at
+            # a genuinely neutral market. Disabled filters now score 0 for BOTH sides.
             use_trend = self.config.strategy.use_trend_filter
-            if not use_trend or preview_close >= preview_ema200:
-                buy_trend = 15.0
-                sell_trend = 0.0
+            if not use_trend:
+                buy_trend = sell_trend = 0.0
+            elif preview_close >= preview_ema200:
+                buy_trend, sell_trend = 15.0, 0.0
             else:
-                sell_trend = 15.0
-                buy_trend = 0.0
+                buy_trend, sell_trend = 0.0, 15.0
 
             use_slope = self.config.strategy.use_ema_slope_filter
-            if not use_slope or preview_ema_slope > 0:
-                buy_slope = 10.0
-                sell_slope = 0.0
+            if not use_slope:
+                buy_slope = sell_slope = 0.0
+            elif preview_ema_slope > 0:
+                buy_slope, sell_slope = 10.0, 0.0
             elif preview_ema_slope < 0:
-                sell_slope = 10.0
-                buy_slope = 0.0
+                buy_slope, sell_slope = 0.0, 10.0
             else:
-                buy_slope = 5.0
-                sell_slope = 5.0
+                buy_slope = sell_slope = 5.0
 
             # 4. Consolidation & Volume
             cons_score = 10.0 if (prior_cons or is_cons) else 0.0
@@ -1179,12 +1446,14 @@ class PaperForwardEngine:
                 "feed_speed": self.feed.get_feed_speed_str(),
                 "last_market_update": last_market_update_ist,
                 "reconnect_count": self.feed.reconnect_count,
-                "cpu_usage_pct": round(cpu_usage_pct, 1),
-                "ram_usage_pct": round(ram_usage_pct, 1),
-                "disk_usage_pct": round(disk_usage_pct, 1),
+                "cpu_usage_pct": cpu_usage_pct,
+                "ram_usage_pct": ram_usage_pct,
+                "disk_usage_pct": disk_usage_pct,
+                "cpu_temp_c": cpu_temp_c,
                 "cpu_usage_str": cpu_usage_str,
                 "ram_usage_str": ram_usage_str,
                 "disk_usage_str": disk_usage_str,
+                "cpu_temp_str": cpu_temp_str,
                 "state_save_status": f"SAVED ({self.last_state_save_time})"
             }
         }
@@ -1198,7 +1467,11 @@ class PaperForwardEngine:
         from common.utils import mute_console_loggers, unmute_console_loggers
 
         # Start single Rich Live dashboard instance BEFORE recovery/warmup/connect
-        with Live(self.dashboard.render(self.build_dashboard_state()), console=self.console, refresh_per_second=2) as live:
+        # screen=True renders into the terminal's alternate screen buffer: the dashboard
+        # is pinned to the viewport, never scrolls, leaves no scrollback trail, and the
+        # original terminal contents are restored on exit.
+        with Live(self.dashboard.render(self.build_dashboard_state()), console=self.console,
+                  refresh_per_second=2, screen=True) as live:
             # Mute console StreamHandlers so stdout belongs 100% exclusively to Rich Live
             mute_console_loggers()
 
