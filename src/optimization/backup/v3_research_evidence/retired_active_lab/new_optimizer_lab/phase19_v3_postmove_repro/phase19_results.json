@@ -1,0 +1,130 @@
+{
+  "stages": {
+    "1a_broad": {
+      "trial": 324,
+      "score": 0.3819783017580578,
+      "params": {
+        "ema_period": 97.0,
+        "rsi_period": 17.0,
+        "rsi_overbought": 78.0,
+        "rsi_oversold": 39.0,
+        "atr_period": 16.0,
+        "consolidation_candles": 6.0,
+        "consolidation_atr_mult": 2.2,
+        "swing_lookback": 10.0,
+        "volume_sma_period": 34.0,
+        "volume_mult": 1.8,
+        "risk_reward_ratio": 2.5
+      }
+    },
+    "1b_narrow": {
+      "trial": 457,
+      "score": 0.41791138488935803,
+      "params": {
+        "ema_period": 97.0,
+        "rsi_period": 18.0,
+        "rsi_overbought": 75.0,
+        "rsi_oversold": 44.0,
+        "atr_period": 17.0,
+        "consolidation_candles": 6.0,
+        "consolidation_atr_mult": 2.2,
+        "swing_lookback": 11.0,
+        "volume_sma_period": 32.0,
+        "volume_mult": 1.8,
+        "risk_reward_ratio": 2.2
+      }
+    },
+    "1c_risk": {
+      "trial": 47,
+      "score": 0.6736376107091483,
+      "params": {
+        "leverage": 3.5,
+        "risk_per_trade_pct": 0.03,
+        "max_position_allocation_pct": 0.65
+      }
+    },
+    "seed": {
+      "ema_period": 97,
+      "rsi_period": 18,
+      "rsi_overbought": 75.0,
+      "rsi_oversold": 44.0,
+      "atr_period": 17,
+      "consolidation_candles": 6,
+      "consolidation_atr_mult": 2.2,
+      "swing_lookback": 11,
+      "volume_sma_period": 32,
+      "volume_mult": 1.8,
+      "risk_reward_ratio": 2.2,
+      "leverage": 3.5,
+      "risk_per_trade_pct": 0.03,
+      "max_position_allocation_pct": 0.65
+    },
+    "2a_final": {
+      "trial": 0,
+      "score": 0.6736376107091483,
+      "params": {
+        "ema_period": 97,
+        "rsi_period": 18,
+        "rsi_overbought": 75.0,
+        "rsi_oversold": 44.0,
+        "atr_period": 17,
+        "consolidation_candles": 6,
+        "consolidation_atr_mult": 2.2,
+        "swing_lookback": 11,
+        "volume_sma_period": 32,
+        "volume_mult": 1.8,
+        "risk_reward_ratio": 2.2,
+        "leverage": 3.5,
+        "risk_per_trade_pct": 0.03,
+        "max_position_allocation_pct": 0.65
+      }
+    },
+    "2b_boll": {
+      "trial": 143,
+      "score": 0.16934812683918388,
+      "cfg": {
+        "enabled": true,
+        "length": 11,
+        "std": 3.0,
+        "min_bandwidth_pct": 1.1,
+        "expansion_lookback": 17,
+        "expansion_min_ratio": 0.1,
+        "min_mid_distance": 0.05
+      }
+    }
+  },
+  "locked_metrics": {
+    "off": {
+      "return_pct": -0.18538133994996314,
+      "pf": 0.9847803613330925,
+      "sharpe": 0.1470786209218513,
+      "max_dd": 10.988626560372822,
+      "trades": 10,
+      "wins": 4,
+      "losses": 6,
+      "win_rate": 40.0,
+      "gross_profit": 1200.27,
+      "gross_loss": 1218.8200000000002,
+      "net_pnl": -18.550000000000182,
+      "fees": 214.3,
+      "blocked": 0,
+      "head_dropped": 0
+    },
+    "on": {
+      "return_pct": 2.6445714366500033,
+      "pf": 1.4118095890624274,
+      "sharpe": 1.0671064131575212,
+      "max_dd": 7.355077148300006,
+      "trades": 5,
+      "wins": 2,
+      "losses": 3,
+      "win_rate": 40.0,
+      "gross_profit": 906.6500000000001,
+      "gross_loss": 642.1899999999999,
+      "net_pnl": 264.46000000000015,
+      "fees": 102.63,
+      "blocked": 10,
+      "head_dropped": 0
+    }
+  }
+}

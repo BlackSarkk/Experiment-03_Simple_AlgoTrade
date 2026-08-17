@@ -1,0 +1,24 @@
+{
+  "_schema_version": 1,
+  "_comment": "Manual research harness input (NOT the auto-optimizer). 2022-01-01 -> 2026-07-15; 2026-07-16 -> 2026-08-15 stays outside the search entirely.",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "history": {
+    "days": null,
+    "start_date": "2022-01-01",
+    "end_date": "2026-07-15"
+  },
+  "initial_balance": 10000,
+  "direction": {
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "trials": 5000,
+  "optimization_mode": "balanced",
+  "stages": {
+    "strategy_optimization": true,
+    "risk_management": true,
+    "bollinger": true
+  }
+}

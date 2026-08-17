@@ -1,0 +1,436 @@
+{
+  "_name": "phase16_repro_winner.json",
+  "_description": "Produced by src/auto_optimise driving canonical optimization.v3. Strategy, risk and filter were selected on TRAIN and VALIDATION only. UNSEEN was opened once, after the winner was frozen, purely to confirm it, and did not influence any selection.",
+  "_generated_by": "auto_optimise/v3",
+  "_optimizer_architecture": "optimization.v3",
+  "_v3_version": "v3-seed-then-config-1.0",
+  "_symbol": "ETHUSDT",
+  "_timeframe": "15m",
+  "_direction": "LONG_ONLY",
+  "_source_preset": "configs/optimize/ophase16_repro.json",
+  "_run_id": "20260817-183751_ETHUSDT_15m",
+  "_run_started_utc": "2026-08-17T18:37:50.016541+00:00",
+  "_environment": {
+    "python": "3.12.3",
+    "numpy": "2.5.2",
+    "optuna": "4.9.0",
+    "pandas": "3.0.5",
+    "interpreter": "/home/rahul/Documents/Claude/Experiment-03_Simple_AlgoTrade/.venv/bin/python3"
+  },
+  "_trial_budget": {
+    "total": 1850,
+    "per_stage": {
+      "stage_1a_broad": 400,
+      "stage_1b_narrow": 800,
+      "stage_1c_risk": 200,
+      "stage_2a_final": 300,
+      "stage_2b_bollinger": 150
+    },
+    "resolved_from": "explicit total from preset"
+  },
+  "_stages": {
+    "stage_1a_broad": "SELECTED",
+    "stage_1b_narrow": "SELECTED",
+    "stage_1c_risk": "SELECTED",
+    "stage_2a_final": "SELECTED",
+    "stage_2b_bollinger": "SELECTED"
+  },
+  "_stages_skipped": [],
+  "_risk_optimized": true,
+  "_warmup_start": "2024-07-05 14:00:00+00:00",
+  "_warmup_end": "2024-07-15 23:45:00+00:00",
+  "_warmup_candles": 1000,
+  "_train_start": "2024-07-16 00:00:00+00:00",
+  "_train_end": "2026-01-14 11:45:00+00:00",
+  "_train_candles": 52560,
+  "_validation_start": "2026-01-14 12:00:00+00:00",
+  "_validation_end": "2026-07-15 23:45:00+00:00",
+  "_validation_candles": 17520,
+  "_unseen_start": "2026-07-16 00:00:00+00:00",
+  "_unseen_end": "2026-08-15 23:45:00+00:00",
+  "_unseen_candles": 2976,
+  "_data_checksum": "01094d3cc91f2b96",
+  "_selected_before_unseen": {
+    "seed": {
+      "ema_period": 97,
+      "rsi_period": 18,
+      "rsi_overbought": 75.0,
+      "rsi_oversold": 44.0,
+      "atr_period": 17,
+      "consolidation_candles": 6,
+      "consolidation_atr_mult": 2.2,
+      "swing_lookback": 11,
+      "volume_sma_period": 32,
+      "volume_mult": 1.8,
+      "risk_reward_ratio": 2.2,
+      "leverage": 3.5,
+      "risk_per_trade_pct": 0.03,
+      "max_position_allocation_pct": 0.65
+    },
+    "winner": {
+      "ema_period": 97,
+      "rsi_period": 18,
+      "rsi_overbought": 75.0,
+      "rsi_oversold": 44.0,
+      "atr_period": 17,
+      "consolidation_candles": 6,
+      "consolidation_atr_mult": 2.2,
+      "swing_lookback": 11,
+      "volume_sma_period": 32,
+      "volume_mult": 1.8,
+      "risk_reward_ratio": 2.2,
+      "leverage": 3.5,
+      "risk_per_trade_pct": 0.03,
+      "max_position_allocation_pct": 0.65
+    },
+    "stage_winners": {
+      "seed": {
+        "strategy_from": {
+          "stage": "1b_narrow",
+          "trial": 457,
+          "score": 0.41791138488935803
+        },
+        "risk_from": {
+          "trial": 47,
+          "score": 0.6736376107091483
+        },
+        "gated": {
+          "broad": 205,
+          "narrow": 771,
+          "risk": 200
+        },
+        "narrowed_space": {
+          "ema_period": [
+            "int",
+            93,
+            117,
+            1
+          ],
+          "rsi_period": [
+            "int",
+            15,
+            21,
+            1
+          ],
+          "rsi_overbought": [
+            "float",
+            74.0,
+            80.0,
+            1.0
+          ],
+          "rsi_oversold": [
+            "float",
+            36.0,
+            44.0,
+            1.0
+          ],
+          "atr_period": [
+            "int",
+            14,
+            18,
+            1
+          ],
+          "consolidation_candles": [
+            "int",
+            5,
+            9,
+            1
+          ],
+          "consolidation_atr_mult": [
+            "float",
+            2.1,
+            2.7,
+            0.1
+          ],
+          "swing_lookback": [
+            "int",
+            9,
+            14,
+            1
+          ],
+          "volume_sma_period": [
+            "int",
+            29,
+            37,
+            1
+          ],
+          "volume_mult": [
+            "float",
+            1.7,
+            2.0,
+            0.1
+          ],
+          "risk_reward_ratio": [
+            "float",
+            1.6,
+            3.1,
+            0.1
+          ]
+        },
+        "seed": {
+          "ema_period": 97,
+          "rsi_period": 18,
+          "rsi_overbought": 75.0,
+          "rsi_oversold": 44.0,
+          "atr_period": 17,
+          "consolidation_candles": 6,
+          "consolidation_atr_mult": 2.2,
+          "swing_lookback": 11,
+          "volume_sma_period": 32,
+          "volume_mult": 1.8,
+          "risk_reward_ratio": 2.2,
+          "leverage": 3.5,
+          "risk_per_trade_pct": 0.03,
+          "max_position_allocation_pct": 0.65
+        }
+      },
+      "narrow_space": {
+        "ema_period": [
+          "int",
+          93,
+          117,
+          1
+        ],
+        "rsi_period": [
+          "int",
+          15,
+          21,
+          1
+        ],
+        "rsi_overbought": [
+          "float",
+          74.0,
+          80.0,
+          1.0
+        ],
+        "rsi_oversold": [
+          "float",
+          36.0,
+          44.0,
+          1.0
+        ],
+        "atr_period": [
+          "int",
+          14,
+          18,
+          1
+        ],
+        "consolidation_candles": [
+          "int",
+          5,
+          9,
+          1
+        ],
+        "consolidation_atr_mult": [
+          "float",
+          2.1,
+          2.7,
+          0.1
+        ],
+        "swing_lookback": [
+          "int",
+          9,
+          14,
+          1
+        ],
+        "volume_sma_period": [
+          "int",
+          29,
+          37,
+          1
+        ],
+        "volume_mult": [
+          "float",
+          1.7,
+          2.0,
+          0.1
+        ],
+        "risk_reward_ratio": [
+          "float",
+          1.6,
+          3.1,
+          0.1
+        ]
+      },
+      "stage_1a_broad": {
+        "trial": 324,
+        "score": 0.3819783017580578,
+        "status": "SELECTED"
+      },
+      "stage_1b_narrow": {
+        "trial": 457,
+        "score": 0.41791138488935803,
+        "status": "SELECTED"
+      },
+      "stage_1c_risk": {
+        "trial": 47,
+        "score": 0.6736376107091483,
+        "status": "SELECTED"
+      },
+      "stage_2a_final": {
+        "trial": 0,
+        "score": 0.6736376107091483,
+        "seed_was_trial_0": true
+      },
+      "stage_2b_bollinger": {
+        "status": "SELECTED",
+        "trial": 143,
+        "score": 0.16934812683918388
+      }
+    },
+    "train_valid_metrics": {
+      "off": {
+        "train": {
+          "return_pct": 98.40060809584979,
+          "pf": 1.321379464411106,
+          "sharpe": 1.5851463394161047,
+          "max_dd": 29.892903673390016,
+          "trades": 125,
+          "wins": 53,
+          "losses": 72,
+          "win_rate": 42.4,
+          "gross_profit": 40458.34,
+          "gross_loss": 30618.260000000002,
+          "net_pnl": 9840.079999999994,
+          "fees": 3846.35,
+          "blocked": 0,
+          "head_dropped": 1
+        },
+        "valid": {
+          "return_pct": 107.73554852804999,
+          "pf": 1.8638433055423254,
+          "sharpe": 3.3217197224238983,
+          "max_dd": 14.38292504845688,
+          "trades": 63,
+          "wins": 30,
+          "losses": 33,
+          "win_rate": 47.61904761904762,
+          "gross_profit": 23245.219999999998,
+          "gross_loss": 12471.66,
+          "net_pnl": 10773.559999999998,
+          "fees": 1947.06,
+          "blocked": 0,
+          "head_dropped": 0
+        }
+      },
+      "on": {
+        "train": {
+          "return_pct": 71.1727679873499,
+          "pf": 1.296929443962352,
+          "sharpe": 1.3161388816526065,
+          "max_dd": 29.89233704671258,
+          "trades": 100,
+          "wins": 41,
+          "losses": 59,
+          "win_rate": 41.0,
+          "gross_profit": 31086.879999999997,
+          "gross_loss": 23969.600000000002,
+          "net_pnl": 7117.279999999995,
+          "fees": 2620.56,
+          "blocked": 53,
+          "head_dropped": 0
+        },
+        "valid": {
+          "return_pct": 124.44314617614998,
+          "pf": 2.3182503850627434,
+          "sharpe": 3.784230041742876,
+          "max_dd": 10.315586115749822,
+          "trades": 47,
+          "wins": 26,
+          "losses": 21,
+          "win_rate": 55.319148936170215,
+          "gross_profit": 21884.33,
+          "gross_loss": 9440.02,
+          "net_pnl": 12444.310000000001,
+          "fees": 1426.6100000000001,
+          "blocked": 38,
+          "head_dropped": 0
+        }
+      }
+    }
+  },
+  "_unseen_confirmation": {
+    "status": "CONFIRMATION_ONLY",
+    "note": "Measured once, after the winner was frozen. These numbers did not influence selection and must never be used to retune.",
+    "unlock_reason": "final UNSEEN confirmation, after the V3 winner and Bollinger filter were frozen",
+    "rows": 2976,
+    "start": "2026-07-16 00:00:00+00:00",
+    "end": "2026-08-15 23:45:00+00:00",
+    "bollinger_off": {
+      "return_pct": -0.18538133994996314,
+      "pf": 0.9847803613330925,
+      "sharpe": 0.1470786209218513,
+      "max_dd": 10.988626560372822,
+      "trades": 10,
+      "wins": 4,
+      "losses": 6,
+      "win_rate": 40.0,
+      "gross_profit": 1200.27,
+      "gross_loss": 1218.8200000000002,
+      "net_pnl": -18.550000000000182,
+      "fees": 214.3,
+      "blocked": 0,
+      "head_dropped": 0
+    },
+    "bollinger_on": {
+      "return_pct": 2.6445714366500033,
+      "pf": 1.4118095890624274,
+      "sharpe": 1.0671064131575212,
+      "max_dd": 7.355077148300006,
+      "trades": 5,
+      "wins": 2,
+      "losses": 3,
+      "win_rate": 40.0,
+      "gross_profit": 906.6500000000001,
+      "gross_loss": 642.1899999999999,
+      "net_pnl": 264.46000000000015,
+      "fees": 102.63,
+      "blocked": 10,
+      "head_dropped": 0
+    }
+  },
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 97,
+    "rsi_period": 18,
+    "rsi_overbought": 75.0,
+    "rsi_oversold": 44.0,
+    "atr_period": 17,
+    "consolidation_candles": 6,
+    "consolidation_atr_mult": 2.2,
+    "swing_lookback": 11,
+    "volume_sma_period": 32,
+    "volume_mult": 1.8,
+    "risk_reward_ratio": 2.2,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "leverage": 3.5,
+    "risk_per_trade_pct": 3.0,
+    "max_position_allocation_pct": 65.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01,
+    "tick_size_source": "auto",
+    "quantity_step": 0.001
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": true,
+      "length": 11,
+      "std": 3.0,
+      "min_bandwidth_pct": 1.1,
+      "expansion_lookback": 17,
+      "expansion_min_ratio": 0.1,
+      "min_mid_distance": 0.05
+    }
+  }
+}

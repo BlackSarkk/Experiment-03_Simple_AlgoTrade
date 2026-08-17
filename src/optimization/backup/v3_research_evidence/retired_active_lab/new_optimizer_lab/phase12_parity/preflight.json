@@ -1,0 +1,72 @@
+[
+  {
+    "check": "zero rows at/after 2026-08-17",
+    "pass": true,
+    "detail": "0"
+  },
+  {
+    "check": "warmup rows == 1000",
+    "pass": true,
+    "detail": "1000"
+  },
+  {
+    "check": "DEV rows == 65760",
+    "pass": true,
+    "detail": "65760"
+  },
+  {
+    "check": "TEST rows == 7392",
+    "pass": true,
+    "detail": "7392"
+  },
+  {
+    "check": "DEV starts 2024-07-16 00:00",
+    "pass": true,
+    "detail": "2024-07-16 00:00:00+00:00"
+  },
+  {
+    "check": "DEV ends 2026-05-31 23:45",
+    "pass": true,
+    "detail": "2026-05-31 23:45:00+00:00"
+  },
+  {
+    "check": "TEST 2026-06-01..2026-08-16",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "70/30 split inside DEV",
+    "pass": true,
+    "detail": "(46032, 19728)"
+  },
+  {
+    "check": "optimization frame excludes TEST",
+    "pass": true,
+    "detail": "66760"
+  },
+  {
+    "check": "budgets 300/150 both arms",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "seed 42 / n_jobs 1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "14-dim ranges identical",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "C158 shadow: long-only + BB on",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "evaluator parity (shared vs recovered run())",
+    "pass": true,
+    "detail": "rec n=142 ret=206.229117 | shared n=142 ret=206.229117"
+  }
+]

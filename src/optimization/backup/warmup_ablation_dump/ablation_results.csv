@@ -1,0 +1,43 @@
+timeframe,vector,warmup_bars,actual_lead,ema200_bar0_diff,ema200_bar170_diff,rsi_bar0_diff,trade_count,baseline_trades,trades_match,return_pct,baseline_return,max_dd_pct,profit_factor,divergence,exact_match
+1m,Vector A (Standard V3 200-EMA),0,0,1.007893,0.184123,14.91743,5,5,True,0.0,0.0,0.31,0.0,EMA-200 bar 0 diff = 1.007893,False
+1m,Vector A (Standard V3 200-EMA),170,170,0.318816,0.058242,0.0003,5,5,True,0.0,0.0,0.31,0.0,EMA-200 bar 0 diff = 0.318816,False
+1m,Vector A (Standard V3 200-EMA),250,250,0.088482,0.016164,1e-06,5,5,True,0.0,0.0,0.31,0.0,EMA-200 bar 0 diff = 0.088482,False
+1m,Vector A (Standard V3 200-EMA),500,500,0.004218,0.000771,0.0,5,5,True,0.0,0.0,0.31,0.0,EMA-200 bar 0 diff = 0.004218,False
+1m,Vector A (Standard V3 200-EMA),750,750,0.001235,0.000226,0.0,5,5,True,0.0,0.0,0.31,0.0,EMA-200 bar 0 diff = 0.001235,False
+1m,Vector A (Standard V3 200-EMA),1000,1000,0.000126,2.3e-05,0.0,5,5,True,0.0,0.0,0.31,0.0,EMA-200 bar 0 diff = 0.000126,False
+1m,Vector A (Standard V3 200-EMA),2000,2000,0.0,0.0,0.0,5,5,True,0.0,0.0,0.31,0.0,NONE,True
+1m,Vector B (Max Lookback 220-EMA),0,0,0.98498,0.21001,6.882933,3,3,True,0.0,0.0,0.25,0.0,EMA-200 bar 0 diff = 0.984980,False
+1m,Vector B (Max Lookback 220-EMA),170,170,0.402596,0.085839,1.512252,3,3,True,0.0,0.0,0.25,0.0,EMA-200 bar 0 diff = 0.402596,False
+1m,Vector B (Max Lookback 220-EMA),250,250,0.120999,0.025799,0.095627,3,3,True,0.0,0.0,0.25,0.0,EMA-200 bar 0 diff = 0.120999,False
+1m,Vector B (Max Lookback 220-EMA),500,500,0.005614,0.001197,0.001815,3,3,True,0.0,0.0,0.25,0.0,EMA-200 bar 0 diff = 0.005614,False
+1m,Vector B (Max Lookback 220-EMA),750,750,0.002499,0.000533,6.9e-05,3,3,True,0.0,0.0,0.25,0.0,EMA-200 bar 0 diff = 0.002499,False
+1m,Vector B (Max Lookback 220-EMA),1000,1000,0.000331,7.1e-05,0.0,3,3,True,0.0,0.0,0.25,0.0,EMA-200 bar 0 diff = 0.000331,False
+1m,Vector B (Max Lookback 220-EMA),2000,2000,0.0,0.0,0.0,3,3,True,0.0,0.0,0.25,0.0,NONE,True
+15m,Vector A (Standard V3 200-EMA),0,0,36.601169,6.686336,2.97412,20,20,True,0.0,0.0,1.15,0.0,EMA-200 bar 0 diff = 36.601169,False
+15m,Vector A (Standard V3 200-EMA),170,170,10.287748,1.879376,2e-06,20,20,True,0.0,0.0,1.15,0.0,EMA-200 bar 0 diff = 10.287748,False
+15m,Vector A (Standard V3 200-EMA),250,250,4.370794,0.798461,0.0,20,20,True,0.0,0.0,1.15,0.0,EMA-200 bar 0 diff = 4.370794,False
+15m,Vector A (Standard V3 200-EMA),500,500,0.01865,0.003407,0.0,20,20,True,0.0,0.0,1.15,0.0,EMA-200 bar 0 diff = 0.018650,False
+15m,Vector A (Standard V3 200-EMA),750,750,0.002184,0.000399,0.0,20,20,True,0.0,0.0,1.15,0.0,EMA-200 bar 0 diff = 0.002184,False
+15m,Vector A (Standard V3 200-EMA),1000,1000,0.0003,5.5e-05,0.0,20,20,True,0.0,0.0,1.15,0.0,EMA-200 bar 0 diff = 0.000300,False
+15m,Vector A (Standard V3 200-EMA),2000,2000,0.0,0.0,0.0,20,20,True,0.0,0.0,1.15,0.0,NONE,True
+15m,Vector B (Max Lookback 220-EMA),0,0,36.984664,7.885599,6.632413,5,5,True,0.0,0.0,0.9,0.0,EMA-200 bar 0 diff = 36.984664,False
+15m,Vector B (Max Lookback 220-EMA),170,170,12.88159,2.746518,0.301896,5,5,True,0.0,0.0,0.9,0.0,EMA-200 bar 0 diff = 12.881590,False
+15m,Vector B (Max Lookback 220-EMA),250,250,5.728388,1.221365,0.189726,5,5,True,0.0,0.0,0.9,0.0,EMA-200 bar 0 diff = 5.728388,False
+15m,Vector B (Max Lookback 220-EMA),500,500,0.044422,0.009471,0.000374,5,5,True,0.0,0.0,0.9,0.0,EMA-200 bar 0 diff = 0.044422,False
+15m,Vector B (Max Lookback 220-EMA),750,750,0.005187,0.001106,5e-06,5,5,True,0.0,0.0,0.9,0.0,EMA-200 bar 0 diff = 0.005187,False
+15m,Vector B (Max Lookback 220-EMA),1000,1000,0.00054,0.000115,0.0,5,5,True,0.0,0.0,0.9,0.0,EMA-200 bar 0 diff = 0.000540,False
+15m,Vector B (Max Lookback 220-EMA),2000,2000,0.0,0.0,0.0,5,5,True,0.0,0.0,0.9,0.0,NONE,True
+1h,Vector A (Standard V3 200-EMA),0,0,90.611059,16.552913,4.012618,22,22,True,0.0,0.0,6.16,0.0,EMA-200 bar 0 diff = 90.611059,False
+1h,Vector A (Standard V3 200-EMA),170,170,5.821707,1.063515,0.000449,22,22,True,0.0,0.0,6.16,0.0,EMA-200 bar 0 diff = 5.821707,False
+1h,Vector A (Standard V3 200-EMA),250,250,1.486359,0.27153,0.0,22,22,True,0.0,0.0,6.16,0.0,EMA-200 bar 0 diff = 1.486359,False
+1h,Vector A (Standard V3 200-EMA),500,500,0.106087,0.01938,0.0,22,22,True,0.0,0.0,6.16,0.0,EMA-200 bar 0 diff = 0.106087,False
+1h,Vector A (Standard V3 200-EMA),750,750,0.015456,0.002824,0.0,22,22,True,0.0,0.0,6.16,0.0,EMA-200 bar 0 diff = 0.015456,False
+1h,Vector A (Standard V3 200-EMA),1000,1000,0.000457,8.4e-05,0.0,22,22,True,0.0,0.0,6.16,0.0,EMA-200 bar 0 diff = 0.000457,False
+1h,Vector A (Standard V3 200-EMA),2000,2000,0.0,0.0,0.0,22,22,True,0.0,0.0,6.16,0.0,NONE,True
+1h,Vector B (Max Lookback 220-EMA),0,0,97.260857,20.737246,4.642344,11,12,False,0.0,0.0,3.48,0.0,Trade #1 entry 2026-04-29 05:00:00+00:00 vs baseline 2026-04-26 06:00:00+00:00,False
+1h,Vector B (Max Lookback 220-EMA),170,170,6.889982,1.469032,3.994709,12,12,True,0.0,0.0,3.48,0.0,EMA-200 bar 0 diff = 6.889982,False
+1h,Vector B (Max Lookback 220-EMA),250,250,2.018728,0.430418,0.12233,12,12,False,0.0,0.0,3.48,0.0,Trade #1 entry 2026-04-24 16:00:00+00:00 vs baseline 2026-04-26 06:00:00+00:00,False
+1h,Vector B (Max Lookback 220-EMA),500,500,0.173819,0.03706,0.000621,12,12,True,0.0,0.0,3.48,0.0,EMA-200 bar 0 diff = 0.173819,False
+1h,Vector B (Max Lookback 220-EMA),750,750,0.033977,0.007244,2e-06,12,12,True,0.0,0.0,3.48,0.0,EMA-200 bar 0 diff = 0.033977,False
+1h,Vector B (Max Lookback 220-EMA),1000,1000,0.00111,0.000237,0.0,12,12,True,0.0,0.0,3.48,0.0,EMA-200 bar 0 diff = 0.001110,False
+1h,Vector B (Max Lookback 220-EMA),2000,2000,0.0,0.0,0.0,12,12,True,0.0,0.0,3.48,0.0,NONE,True

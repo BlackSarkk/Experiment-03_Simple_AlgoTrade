@@ -238,10 +238,23 @@ Running `tests/unit` triggers a 3h market-data download; delete
 | `auto_optimise/preset.py` | `OptimizerPreset`, schema validation for `configs/optimize/*.json` |
 | `auto_optimise/history.py` | `History` — days ⊻ (start_date+end_date) resolution |
 | `auto_optimise/output_guard.py` | mandatory, non-overwriting, non-escaping output name |
-| `auto_optimise/trials.py` | `"auto"` → per-timeframe **Phase-A** trial budget |
-| `auto_optimise/dataprep.py` | stage [1/6]: load → indicators → slice → 60/20/20 partitions |
+| `auto_optimise/budgets.py` | ONE total → the five V3 stage budgets; `"auto"` resolution |
+| `auto_optimise/market_rules.py` | tick size / quantity step from exchange metadata |
+| `auto_optimise/v3_stages.py` | drives the five canonical V3 stages; owns no mathematics |
+| `auto_optimise/v3_confirm.py` | the single, post-freeze UNSEEN read |
+| `auto_optimise/v3_config_writer.py` | final config payload; publishes via `config_writer.write` |
+| `auto_optimise/v3_controller.py` | stage sequencing, manifest, ledgers, artifacts |
+| `auto_optimise/v3_runplan.py` | run plan and result rendering; live facts only |
+| `auto_optimise/trials.py` | legacy per-timeframe table, superseded by `budgets.py` |
+| `auto_optimise/dataprep.py` | load → indicators → slice → reserve UNSEEN → V3 70/30 within DEV |
 | `auto_optimise/unseen.py` | `UnseenVault` — structural one-way UNSEEN barrier |
 | `auto_optimise/lookback.py` | warmup sizing from the widest supported lookbacks |
+| `auto_optimise/search_space.py` | Phase-A parameter ranges — the only definition |
+| `auto_optimise/scoring.py` | `phase_a_score_v1` + rejection rules |
+| `auto_optimise/evaluation.py` | neutral risk policy; the only call into the trading stack |
+| `auto_optimise/phase_a.py` | stage [2/6]: TPE study, shortlist, VALIDATION screen |
+| `auto_optimise/artifacts.py` | run directory, trials/shortlist CSV, manifest |
+| `auto_optimise/dashboard.py` | live rich display; presentation only |
 | `auto_optimise/runplan.py` | 6-stage run plan rendering |
 | `auto_optimise/ui.py` | colour helpers; degrades without a TTY, never affects results |
 
@@ -333,24 +346,27 @@ Then it `exec`s `src/auto_optimise/cli.py` with the remaining arguments.
 `.json` · must not already exist · realpath must resolve
 directly inside `configs/config/`. Every failure exits 1.
 
-**Preset validation** (`preset.load`): all nine top-level fields required ·
+**Preset validation** (`preset.load`): `_schema_version: 3` required · all top-level fields required ·
 platform in `BINANCE_FUTURES` · timeframe in `1m,3m,5m,15m,30m,1h,2h,3h,4h` ·
 `initial_balance ≥ 100` · at least one direction true · at least one stage true ·
-`trials` is `"auto"` or an int in `[10, 100000]` · mode in
+`trials` is `"auto"` or an int in `[145, 100000]` · mode in
 `balanced,conservative,aggressive` · unknown keys in `history` and `stages`
 rejected.
 
-**History** (`history.resolve`): `days` and `start_date`/`end_date` are mutually
-exclusive and one is required. `days ∈ [30, 3650]`. Explicit ranges need both
-endpoints, `YYYY-MM-DD`, `end > start`, span ≥ 30 days. Relative mode is resolved
-to concrete dates later, once the data layer reports the latest available candle.
+**History** (`history.resolve`): `history.mode` must be one of `auto`, `days`, `date_range`, `candles`.
+Exactly one mode active; required fields per mode must be non-null and all others null.
+`auto` targets ~43,000 candles from timeframe (1m -> 30d, 3m -> 90d, 5m -> 150d, 15m -> 450d, 30m -> 900d, 1h -> 1800d, 2h/3h/4h -> 3650d).
+`days` requires positive int $\ge 1$. `date_range` requires `YYYY-MM-DD` strings with `start_date < end_date` (UTC). `candles` requires positive int $\ge 1$ evaluable candles before partitioning. Custom short history emits `NOTE: Custom short history — results are experimental.` without stopping execution.
 
 **Stage [1/6] — data preparation (implemented).** `dataprep.prepare(preset)` returns
 `PreparedData`. Order is mandatory: load a frame covering warmup + the requested
 window, `compute_all_indicators` ONCE on all of it, then slice. Warmup is trimmed
 to exactly `lookback.required_warmup_candles()` (1000) so cache width cannot change
 results, and the still-forming candle is dropped so re-fetches cannot. The
-evaluation window is split chronologically 60/20/20 by calendar time; warmup is not
+evaluation window reserves the final 20% as sealed UNSEEN, then the remaining DEV
+is split by V3's own `TRAIN_FRAC` (70/30) BY ROW COUNT — the same arithmetic
+`Campaign.__init__` uses, so the reported dates are the ones the search used.
+Effective full-history split: TRAIN 56% / VALID 24% / UNSEEN 20%. Warmup is not
 part of the split. Every run asserts count conservation, non-overlap, gap-free
 reconstruction, and real indicator context at the first TRAIN and VALIDATION candle.
 Violations raise `AssertionError` — they mean results would be silently wrong.
@@ -365,26 +381,31 @@ ranking code may call it.
 between different requested ranges can force a refetch, so a checksum is stable for a
 settled cache and a fixed window, not across window changes.
 
-**Planned phases** (not implemented):
-- **A — strategy**: search the shared `StrategyConfig` fields under a neutral risk
-  policy (leverage 1.0, fixed risk/allocation) so ranking is sizing-neutral.
-- **B — risk**: strategy frozen; search `leverage`, `risk_per_trade_pct`,
-  `max_position_allocation_pct` only. Sizing formulas, margin semantics, quantity
-  rounding, invalid-SL rules, tick handling and execution stay frozen. Scored on
-  return/PF/DD/Sharpe/fees/margin safety together — never lowest-DD or
-  highest-leverage alone. B2 perturbs the best regions and discards anything that
-  collapses under a small change.
-- **C — Bollinger**: strategy and risk frozen; search the six
-  `BollingerFilterConfig` fields, compared FILTER OFF vs ON on TRAIN+VALIDATION.
-  Settings that merely delete almost every trade are rejected; if the filter does
-  not convincingly improve the system the winner may ship with it disabled.
-- **Final**: Top-10 built on TRAIN+VALIDATION only, then UNSEEN unlocked once and
-  each candidate flagged `CONFIRMED` / `DEGRADED` / `FAILED`. UNSEEN never
-  reorders the Top-10 and never triggers retuning. The emitted config is the
-  preselected #1 with its UNSEEN status in metadata.
+**The five V3 stages (implemented).** `v3_stages.run(preset, prepared, allocation)`.
+The module imports `optimization.v3` and drives `V3.Campaign`; it defines no range,
+gate, weight or sampler of its own. Budgets are applied by `_BudgetOverride`, a
+context manager that temporarily sets the five `spec` trial constants and restores
+them on exit even if a stage raises — V3's source file is never modified.
 
-**Known deviation from the current legacy optimizers:** both
-`src/optimization/deep_15m_optimizer.py` and `multi_tf_optimizer.py` slice first
-and then call `compute_all_indicators` on the slice, restarting every rolling
-window at the partition edge. `auto_optimise` must compute indicators on the full
-warmup+partitions frame per trial and slice by index, matching `main.py`.
+`Campaign` is constructed with `dev_frame_and_warmup(prepared)`, which slices
+`raw_full` at `_bounds["unseen"][0]`. The UNSEEN rows are therefore absent from the
+frame, not merely unread. The vault is asserted locked immediately before and after
+the search.
+
+TPE seed 42, `n_jobs=1`. Stage 1 returns exactly one 14-dimension seed; stage 2a
+enqueues it as trial 0 and re-opens all 14 dims; stage 2b searches the six
+`BollingerFilterConfig` fields with strategy and risk frozen and ships the filter OFF
+when nothing clears its gate — a reported outcome, not a failure.
+
+Engine stdout/stderr is redirected during trials — the per-bar tqdm and rich console
+would otherwise flood the terminal and fight the dashboard. Behaviour is untouched.
+
+**UNSEEN confirmation.** `v3_confirm.confirm(preset, prepared, winner, bollinger)`
+calls `vault.unlock(reason)` once, computes indicators on the full frame and slices
+`_bounds["unseen"]`, then measures the frozen winner BB OFF and BB ON. The result is
+tagged `CONFIRMATION_ONLY`. Nothing consumes it except the manifest, the config
+metadata and the terminal report.
+
+**Failure policy.** `StageFailure` from any required enabled stage returns from the
+controller before `v3_config_writer` is reached, so `configs/config/` is untouched.
+

@@ -1,0 +1,24 @@
+{
+  "_schema_version": 1,
+  "_comment": "Long-history Phase-A campaign. 3 years of 15m data; identical scoring, trade gate and neutral risk to odefault.json \u2014 only the history window differs.",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "history": {
+    "days": 1095,
+    "start_date": null,
+    "end_date": null
+  },
+  "initial_balance": 10000,
+  "direction": {
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "trials": "auto",
+  "optimization_mode": "balanced",
+  "stages": {
+    "strategy_optimization": true,
+    "risk_management": true,
+    "bollinger": true
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "question": "does the 95-candle DEV shortfall change the scenario-4 inputs?",
+  "loaded": {
+    "rows": 160033,
+    "start": "2021-12-21 00:00:00+00:00",
+    "end": "2026-07-15 00:00:00+00:00",
+    "locked_rows_loaded": 0
+  },
+  "historical_reference": {
+    "train": {
+      "return_pct": 193.01,
+      "trades": 152
+    },
+    "valid": {
+      "return_pct": 17.3,
+      "trades": 59
+    }
+  },
+  "split_points": {
+    "historical_by_timestamp": 139104,
+    "fraction_split_now": 139037,
+    "fraction_split_timestamp": "2025-12-08 07:15:00+00:00"
+  },
+  "cases": [
+    {
+      "case": "A TRAIN  (historical timestamps)",
+      "lo": 90048,
+      "hi": 139104,
+      "rows": 49056,
+      "start": "2024-07-16 00:00:00+00:00",
+      "end": "2025-12-08 23:45:00+00:00",
+      "expected_return_pct": 193.01,
+      "expected_trades": 152,
+      "return_pct": 193.01238089829897,
+      "net_pnl": 19301.238089829898,
+      "gross_profit": 76726.02,
+      "gross_loss": 57424.77,
+      "pf": 1.33611366662853,
+      "sharpe": 1.8816815986363822,
+      "max_dd": 32.72218548097705,
+      "trades": 152,
+      "wins": 47,
+      "losses": 105,
+      "win_rate": 30.92105263157895,
+      "fees": 5775.83,
+      "blocked": 0
+    },
+    {
+      "case": "B VALID  (historical start, our tail)",
+      "lo": 139104,
+      "hi": 160033,
+      "rows": 20929,
+      "start": "2025-12-09 00:00:00+00:00",
+      "end": "2026-07-15 00:00:00+00:00",
+      "expected_return_pct": 17.3,
+      "expected_trades": 59,
+      "return_pct": 17.303842187850005,
+      "net_pnl": 1730.3842187850005,
+      "gross_profit": 12783.220000000001,
+      "gross_loss": 11052.860000000002,
+      "pf": 1.1565531455207068,
+      "sharpe": 0.7937066848143681,
+      "max_dd": 29.675199677264853,
+      "trades": 59,
+      "wins": 16,
+      "losses": 43,
+      "win_rate": 27.11864406779661,
+      "fees": 1139.59,
+      "blocked": 0
+    },
+    {
+      "case": "C VALID  (fraction split, our data)",
+      "lo": 139037,
+      "hi": 160033,
+      "rows": 20996,
+      "start": "2025-12-08 07:15:00+00:00",
+      "end": "2026-07-15 00:00:00+00:00",
+      "expected_return_pct": 17.3,
+      "expected_trades": 59,
+      "return_pct": 17.303842187850005,
+      "net_pnl": 1730.3842187850005,
+      "gross_profit": 12783.220000000001,
+      "gross_loss": 11052.860000000002,
+      "pf": 1.1565531455207068,
+      "sharpe": 0.7924391969119425,
+      "max_dd": 29.675199677264853,
+      "trades": 59,
+      "wins": 16,
+      "losses": 43,
+      "win_rate": 27.11864406779661,
+      "fees": 1139.59,
+      "blocked": 0
+    }
+  ],
+  "unlock_unseen_called": false
+}

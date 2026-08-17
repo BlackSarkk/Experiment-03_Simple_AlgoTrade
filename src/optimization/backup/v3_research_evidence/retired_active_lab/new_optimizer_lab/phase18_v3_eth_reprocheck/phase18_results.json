@@ -1,0 +1,163 @@
+{
+  "preflight": [
+    {
+      "check": "warmup rows == 1000",
+      "pass_ok": true,
+      "detail": "1000"
+    },
+    {
+      "check": "DEV rows == 70080",
+      "pass_ok": true,
+      "detail": "70080"
+    },
+    {
+      "check": "DEV starts 2024-07-16 00:00",
+      "pass_ok": true,
+      "detail": "2024-07-16 00:00:00+00:00"
+    },
+    {
+      "check": "DEV ends 2026-07-15 23:45",
+      "pass_ok": true,
+      "detail": "2026-07-15 23:45:00+00:00"
+    },
+    {
+      "check": "70/30 split inside DEV (TRAIN=49056, VALID=21024)",
+      "pass_ok": true,
+      "detail": "TRAIN=49056, VALID=21024"
+    },
+    {
+      "check": "VALID starts 2025-12-09 00:00",
+      "pass_ok": true,
+      "detail": "2025-12-09 00:00:00+00:00"
+    },
+    {
+      "check": "optimization frame excludes locked window",
+      "pass_ok": true,
+      "detail": "rows >= HARD_LOCKED = 0"
+    },
+    {
+      "check": "budgets: 1a=400, 1b=800, 1c=200, 2a=300, 2b=150",
+      "pass_ok": true,
+      "detail": "1a=400, 1b=800, 1c=200, 2a=300, 2b=150"
+    },
+    {
+      "check": "seed = 42, n_jobs = 1",
+      "pass_ok": true,
+      "detail": "seed=42, n_jobs=1"
+    },
+    {
+      "check": "long_only (long_enabled=True, short_enabled=False)",
+      "pass_ok": true,
+      "detail": "long=True, short=False"
+    },
+    {
+      "check": "evaluator parity (recovered vs BacktestEngine)",
+      "pass_ok": true,
+      "detail": "rec n=152 ret=193.012381 | v2 n=152 ret=193.012381"
+    }
+  ],
+  "stages": {
+    "1a_broad": {
+      "trial": 374,
+      "score": 0.41453855076537593,
+      "expected_trial": 324,
+      "expected_score": 0.382
+    },
+    "1b_narrow": {
+      "trial": 614,
+      "score": 0.44198828355362507,
+      "expected_trial": 457,
+      "expected_score": 0.4179
+    },
+    "1c_risk": {
+      "trial": 23,
+      "score": 0.6659217780123764,
+      "expected_trial": 47,
+      "expected_score": 0.6736
+    },
+    "2a_final": {
+      "trial": 0,
+      "score": 0.6659217780123764,
+      "expected_trial": 0,
+      "expected_score": 0.6736
+    },
+    "2b_boll": {
+      "trial": 42,
+      "score": 0.2510975523397246,
+      "expected_trial": 143,
+      "expected_score": 0.1693
+    }
+  },
+  "locked_metrics": {
+    "off": {
+      "return_pct": -5.095151485399983,
+      "pf": 0.24177443116713046,
+      "sharpe": -1.8397778433033254,
+      "max_dd": 7.441519914299988,
+      "trades": 6.0,
+      "wins": 1.0,
+      "losses": 5.0,
+      "win_rate": 16.666666666666668,
+      "gross_profit": 162.47,
+      "gross_loss": 671.99,
+      "net_pnl": -509.52,
+      "fees": 86.91,
+      "blocked": 0.0,
+      "head_dropped": 0.0
+    },
+    "on": {
+      "return_pct": -5.095151485399983,
+      "pf": 0.24177443116713046,
+      "sharpe": -1.8397778433033254,
+      "max_dd": 7.441519914299988,
+      "trades": 6.0,
+      "wins": 1.0,
+      "losses": 5.0,
+      "win_rate": 16.666666666666668,
+      "gross_profit": 162.47,
+      "gross_loss": 671.99,
+      "net_pnl": -509.52,
+      "fees": 86.91,
+      "blocked": 2.0,
+      "head_dropped": 0.0
+    }
+  },
+  "expected_locked": {
+    "off": {
+      "return_pct": -0.19,
+      "pf": 0.985,
+      "max_dd": 10.99,
+      "trades": 10,
+      "net_pnl": -18.55
+    },
+    "on": {
+      "return_pct": 2.64,
+      "pf": 1.412,
+      "max_dd": 7.36,
+      "trades": 5,
+      "net_pnl": 264.46
+    }
+  },
+  "mismatches": [
+    "Stage 1a trial: got 374, expected 324",
+    "Stage 1a score: 0.4145 (expected 0.3820, diff 0.0325)",
+    "Stage 1b trial: got 614, expected 457",
+    "Stage 1b score: 0.4420 (expected 0.4179, diff 0.0241)",
+    "Stage 1c trial: got 23, expected 47",
+    "Stage 1c score: 0.6659 (expected 0.6736, diff 0.0077)",
+    "Stage 1c risk: got 2.5x/0.030/0.60, expected 3.5x/0.030/0.65",
+    "Stage 2a score: 0.6659 (expected 0.6736, diff 0.0077)",
+    "Stage 2b trial: got 42, expected 143",
+    "Stage 2b score: 0.2511 (expected 0.1693, diff 0.0818)",
+    "Stage 2b params: got (30, 2.4, 0.30000000000000004, 11, 0.5, 0.06), expected (11, 3.0, 1.1, 17, 0.1, 0.05)",
+    "Locked BB OFF return: -5.10% vs -0.19%",
+    "Locked BB OFF PF: 0.242 vs 0.985",
+    "Locked BB OFF DD: 7.44% vs 10.99%",
+    "Locked BB OFF trades: 6 vs 10",
+    "Locked BB OFF net: $-509.52 vs $-18.55",
+    "Locked BB ON return: -5.10% vs 2.64%",
+    "Locked BB ON PF: 0.242 vs 1.412",
+    "Locked BB ON trades: 6 vs 5",
+    "Locked BB ON net: $-509.52 vs $264.46"
+  ]
+}

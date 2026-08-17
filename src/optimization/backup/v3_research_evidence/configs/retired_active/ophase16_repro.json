@@ -1,0 +1,40 @@
+{
+  "_schema_version": 2,
+  "_comment": "Controlled reproduction of the Phase-16 ETH campaign through the human V3 command. Explicit window and explicit UNSEEN boundary so the partitions match the historical run exactly.",
+
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+
+  "history": {
+    "days": null,
+    "start_date": "2024-07-16",
+    "end_date": "2026-08-15",
+    "candles": null
+  },
+
+  "initial_balance": 10000,
+
+  "direction": {
+    "long_enabled": true,
+    "short_enabled": false
+  },
+
+  "execution": {
+    "tick_size": "auto"
+  },
+
+  "partition": {
+    "unseen_start": "2026-07-16"
+  },
+
+  "trials": 1850,
+
+  "optimization_mode": "balanced",
+
+  "stages": {
+    "strategy_optimization": true,
+    "risk_management": true,
+    "bollinger": true
+  }
+}

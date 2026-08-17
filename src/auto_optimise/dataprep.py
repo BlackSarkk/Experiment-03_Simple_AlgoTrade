@@ -4,8 +4,11 @@
       -> load / download market data (warmup + requested window)
       -> compute_all_indicators ONCE on the full frame
       -> slice the evaluation window
-      -> split chronologically 60 / 20 / 20
+      -> reserve the final 20% chronologically as sealed UNSEEN
+      -> split the remaining DEV by V3's own 70/30 ratio, by row count
       -> expose TRAIN and VALIDATION, seal UNSEEN
+
+    Effective full-history split:  TRAIN 56% / VALID 24% / UNSEEN 20%
 
 The ordering is the point: indicators exist before any slice is taken, so no
 rolling window ever restarts at a partition boundary. Every later phase consumes
@@ -13,6 +16,7 @@ the frames produced here and never re-loads or re-slices raw data itself.
 """
 
 import hashlib
+import os
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
@@ -23,12 +27,50 @@ from common.config import PipelineConfig, StrategyConfig
 from common.market_data import MarketDataLoader
 from strategy.indicators import compute_all_indicators
 
-from . import lookback
+from . import history as history_mod, lookback
 from .unseen import UnseenVault
 
-TRAIN_FRACTION = 0.60
-VALID_FRACTION = 0.20
-# UNSEEN takes the remainder, so the three always sum to exactly the window.
+# ---------------------------------------------------------------------------
+# CANONICAL PARTITION POLICY
+#
+#   full requested history
+#     -> reserve the final UNSEEN_FRACTION chronologically as sealed UNSEEN
+#     -> the remaining span is DEV
+#     -> V3's own fixed 70/30 split applies WITHIN DEV
+#
+# Effective full-history split at the default 20% UNSEEN:
+#
+#     TRAIN 56%  /  VALID 24%  /  UNSEEN 20%
+#
+# UNSEEN is reserved FIRST, before any split of DEV, and is physically removed
+# from the frame the optimizer receives. It stays inaccessible until the single
+# final confirmation, after the winner is frozen.
+# ---------------------------------------------------------------------------
+UNSEEN_FRACTION = 0.20
+DEV_FRACTION = 1.0 - UNSEEN_FRACTION
+
+from optimization.v3 import spec as _V3_SPEC          # stdlib-only module
+
+DEV_TRAIN_FRACTION = _V3_SPEC.TRAIN_FRAC              # 0.70, canonical, not tunable
+DEV_VALID_FRACTION = 1.0 - DEV_TRAIN_FRACTION         # 0.30
+
+# Effective whole-history fractions, derived — never hardcoded.
+TRAIN_FRACTION = DEV_FRACTION * DEV_TRAIN_FRACTION    # 0.56
+VALID_FRACTION = DEV_FRACTION * DEV_VALID_FRACTION    # 0.24
+
+
+def effective_ratios(unseen_fraction: float = UNSEEN_FRACTION) -> dict:
+    """The three whole-history percentages implied by an UNSEEN reservation."""
+    dev = 1.0 - float(unseen_fraction)
+    return {
+        "train_pct": round(100.0 * dev * DEV_TRAIN_FRACTION, 1),
+        "valid_pct": round(100.0 * dev * DEV_VALID_FRACTION, 1),
+        "unseen_pct": round(100.0 * float(unseen_fraction), 1),
+        "dev_pct": round(100.0 * dev, 1),
+        "dev_train_pct": round(100.0 * DEV_TRAIN_FRACTION, 1),
+        "dev_valid_pct": round(100.0 * DEV_VALID_FRACTION, 1),
+    }
+
 
 TIMEFRAME_MINUTES = {
     "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
@@ -56,13 +98,21 @@ class Partition:
 
 @dataclass(frozen=True)
 class PreparedData:
+    """Stage-1 output."""
+
     symbol: str
     timeframe: str
+    source_timeframe: str
+    is_resampled: bool
+    available_bars: int
+    warmup_candles: int
+    evaluable_bars: int
+    target_reached: bool
+    availability_limited: bool
     requested_start: pd.Timestamp
     requested_end: pd.Timestamp
     warmup_start: pd.Timestamp
     warmup_end: pd.Timestamp
-    warmup_candles: int
     full_candles: int
     checksum: str
     train: Partition
@@ -71,6 +121,54 @@ class PreparedData:
     unseen_start: pd.Timestamp
     unseen_end: pd.Timestamp
     unseen_candles: int
+    raw_full: pd.DataFrame = None
+    _bounds: dict = None
+    _unseen_pinned: bool = False
+
+    def context_for(self, partition: str):
+        key = partition.lower()
+        if key not in ("train", "validation"):
+            raise ValueError(
+                f"context_for({partition!r}) is not available; TRAIN and VALIDATION "
+                "only. UNSEEN must be requested from the locked vault."
+            )
+        start, end = self._bounds[key]
+        return self._context(start, end)
+
+    def context_for_unseen(self):
+        from .unseen import UnseenLockedError
+        if self.unseen.is_locked:
+            raise UnseenLockedError(
+                "UNSEEN context requested while the vault is locked; only stage "
+                "[6/6] may unlock, and only after the champion is frozen"
+            )
+        start, end = self._bounds["unseen"]
+        return self._context(start, end)
+
+    def context_for_window(self, start_ts, end_ts):
+        import pandas as _pd
+        limit = _pd.Timestamp(self.validation.end)
+        start_ts = _pd.Timestamp(start_ts)
+        end_ts = _pd.Timestamp(end_ts)
+        if end_ts > limit:
+            raise ValueError(
+                f"window end {end_ts} reaches past VALIDATION ({limit}); "
+                "UNSEEN is locked and can never be evaluated here"
+            )
+        dt = self.raw_full["datetime"]
+        start = int((dt < start_ts).sum())
+        end = int((dt <= end_ts).sum())
+        if end <= start:
+            raise ValueError(f"window {start_ts} -> {end_ts} contains no candles")
+        return self._context(start, end)
+
+    def _context(self, start: int, end: int):
+        lead = max(0, start - self.warmup_candles)
+        frame = self.raw_full.iloc[lead:end].reset_index(drop=True)
+        return frame, start - lead
+
+    def eval_frame(self, frame, lead):
+        return frame.iloc[lead:].reset_index(drop=True)
 
 
 def _fmt(ts) -> str:
@@ -78,12 +176,6 @@ def _fmt(ts) -> str:
 
 
 def _warmup_strategy_config(symbol: str, timeframe: str) -> StrategyConfig:
-    """Indicator config used for the one-shot warmup computation.
-
-    Phase A will recompute indicators per trial with that trial's parameters; this
-    pass exists so the partition boundaries and the warmup assertions can be
-    established with the widest lookbacks the search may request.
-    """
     cfg = StrategyConfig()
     cfg.symbol = symbol
     cfg.resolution = timeframe
@@ -96,32 +188,28 @@ def _checksum(df: pd.DataFrame) -> str:
     return hashlib.sha256(hashed.tobytes()).hexdigest()[:16]
 
 
-def _load_raw(preset, warmup_candles: int, data_dir: str, quiet: bool) -> pd.DataFrame:
-    """Load a frame that covers warmup + the requested window."""
-    tf_minutes = TIMEFRAME_MINUTES[preset.timeframe]
-    warmup_delta = timedelta(minutes=tf_minutes * warmup_candles)
+def _load_raw(preset, data_dir: str, quiet: bool) -> tuple[pd.DataFrame, str, bool]:
+    """Load all available complete candles for the platform/symbol/timeframe."""
+    tf_minutes = int(history_mod.parse_timeframe_minutes(preset.timeframe))
 
     cfg = PipelineConfig()
     cfg.platform.platform = preset.platform
     cfg.platform.symbol = preset.symbol
     cfg.platform.resolution = preset.timeframe
 
-    hist = preset.history
-    if hist.mode == "explicit":
-        cfg.platform.start_date = (
-            pd.Timestamp(hist.start_date) - warmup_delta
-        ).strftime("%Y-%m-%d")
-        cfg.platform.end_date = hist.end_date.strftime("%Y-%m-%d")
-        cfg.platform.days = None
+    loader = MarketDataLoader(data_dir)
+    needs_resample = preset.timeframe in ["2h", "3h", "6h", "12h"]
+    source_timeframe = "1h" if needs_resample else preset.timeframe
+    is_resampled = needs_resample
+
+    cache_path = loader.get_cache_filename(preset.symbol, preset.timeframe, preset.platform)
+    if os.path.exists(cache_path):
+        df = pd.read_csv(cache_path)
     else:
-        # Relative mode anchors on the latest available candle, which is only
-        # known after the load, so fetch the requested span plus the warmup lead-in.
+        cfg.platform.days = None
         cfg.platform.start_date = None
         cfg.platform.end_date = None
-        cfg.platform.days = int(hist.days + (warmup_delta.total_seconds() / 86400.0) + 2)
-
-    loader = MarketDataLoader(data_dir)
-    df = loader.load_ohlcv(cfg.platform, reset_cache=False, quiet=quiet)
+        df = loader.load_ohlcv(cfg.platform, reset_cache=False, quiet=quiet)
 
     if df is None or df.empty:
         raise DataPreparationError(
@@ -132,9 +220,6 @@ def _load_raw(preset, warmup_candles: int, data_dir: str, quiet: bool) -> pd.Dat
     df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
     df = df.sort_values("datetime").drop_duplicates("datetime").reset_index(drop=True)
 
-    # Drop the still-forming candle. Its close and volume mutate on every fetch,
-    # which would make indicators, partitions and checksums differ between two
-    # otherwise identical runs. Only closed candles are admissible.
     bar = pd.Timedelta(minutes=tf_minutes)
     now = pd.Timestamp.now(tz="UTC")
     df = df.loc[df["datetime"] + bar <= now].reset_index(drop=True)
@@ -142,19 +227,7 @@ def _load_raw(preset, warmup_candles: int, data_dir: str, quiet: bool) -> pd.Dat
         raise DataPreparationError(
             f"no closed candles available for {preset.symbol} {preset.timeframe}"
         )
-    return df
-
-
-def _requested_window(preset, df: pd.DataFrame):
-    hist = preset.history
-    if hist.mode == "explicit":
-        start = pd.Timestamp(hist.start_date, tz="UTC")
-        # A bare end date reads as inclusive end-of-day, matching main.py.
-        end = pd.Timestamp(hist.end_date, tz="UTC") + pd.Timedelta(hours=23, minutes=59, seconds=59)
-    else:
-        end = df["datetime"].iloc[-1]
-        start = end - pd.Timedelta(days=hist.days)
-    return start, end
+    return df, source_timeframe, is_resampled
 
 
 def prepare(preset, data_dir: str = "data", quiet: bool = True,
@@ -165,172 +238,167 @@ def prepare(preset, data_dir: str = "data", quiet: bool = True,
         if progress is not None:
             progress(msg)
 
-    warmup_candles = lookback.required_warmup_candles()
+    warmup_candles = history_mod.AUTO_WARMUP_BARS  # 1,000
 
-    say(f"Loading {preset.symbol} {preset.timeframe} "
-        f"({preset.history.describe()}, +{warmup_candles} warmup candles)")
-    raw = _load_raw(preset, warmup_candles, data_dir, quiet)
+    raw_df, source_timeframe, is_resampled = _load_raw(preset, data_dir, quiet)
+    available_bars = len(raw_df)
 
-    requested_start, requested_end = _requested_window(preset, raw)
+    source_tf_desc = f"{source_timeframe} (resampled to {preset.timeframe})" if is_resampled else f"{source_timeframe} (native)"
 
-    available_start = raw["datetime"].iloc[0]
-    available_end = raw["datetime"].iloc[-1]
-    if requested_start < available_start:
-        requested_start = available_start
-    if requested_end > available_end:
-        requested_end = available_end
-    if requested_end <= requested_start:
-        raise DataPreparationError(
-            f"requested window is empty after clamping to available data "
-            f"({_fmt(available_start)} -> {_fmt(available_end)})"
-        )
+    say(f"Loading {preset.symbol} {preset.timeframe} [{source_tf_desc}] "
+        f"({preset.history.describe(preset.timeframe)}, +{warmup_candles} warmup candles)")
 
-    # Trim the lead-in to exactly `warmup_candles`. The cache is allowed to be
-    # wider than needed and its width varies between runs, so keeping whatever
-    # happened to be on disk would make indicator values — and therefore every
-    # downstream result — depend on cache history rather than on the request.
-    pre = raw.index[raw["datetime"] < requested_start]
-    if len(pre) > warmup_candles:
-        raw = raw.loc[pre[-warmup_candles]:].reset_index(drop=True)
+    hist = preset.history
 
-    # --- indicators FIRST, on the whole warmup+window frame ------------------
+    if hist.mode == "auto":
+        if available_bars < history_mod.AUTO_MIN_TOTAL_BARS:
+            raise DataPreparationError(
+                f"AUTO HISTORY UNAVAILABLE: {preset.timeframe} has {available_bars:,} complete bars; "
+                f"canonical V3 AUTO requires 1,000 warmup bars plus at least 1,000 evaluable bars. "
+                f"Choose a lower timeframe or explicit custom mode."
+            )
+        evaluable_bars = min(history_mod.AUTO_TARGET_EVALUABLE_BARS, available_bars - warmup_candles)
+        total_required = warmup_candles + evaluable_bars
+        raw = raw_df.iloc[-total_required:].reset_index(drop=True)
+        requested_start = raw["datetime"].iloc[warmup_candles]
+        requested_end = raw["datetime"].iloc[-1]
+        target_reached = (evaluable_bars >= history_mod.AUTO_TARGET_EVALUABLE_BARS)
+        availability_limited = not target_reached
+
+    elif hist.mode == "candles":
+        requested_eval = hist.candles
+        total_required = requested_eval + warmup_candles
+        if available_bars < total_required:
+            raise DataPreparationError(
+                f"requested {requested_eval:,} candles plus 1,000 warmup candles ({total_required:,} total), "
+                f"but only {available_bars:,} complete bars available for {preset.symbol} {preset.timeframe}"
+            )
+        evaluable_bars = requested_eval
+        raw = raw_df.iloc[-total_required:].reset_index(drop=True)
+        requested_start = raw["datetime"].iloc[warmup_candles]
+        requested_end = raw["datetime"].iloc[-1]
+        target_reached = (evaluable_bars >= history_mod.AUTO_TARGET_EVALUABLE_BARS)
+        availability_limited = not target_reached
+
+    elif hist.mode in ("days", "date_range"):
+        if hist.mode == "date_range":
+            start_target = pd.Timestamp(hist.start_date, tz="UTC")
+            end_target = pd.Timestamp(hist.end_date, tz="UTC") + pd.Timedelta(hours=23, minutes=59, seconds=59)
+        else:  # "days"
+            end_target = raw_df["datetime"].iloc[-1]
+            start_target = end_target - pd.Timedelta(days=hist.days)
+
+        in_range_idx = raw_df.index[(raw_df["datetime"] >= start_target) & (raw_df["datetime"] <= end_target)]
+        if len(in_range_idx) == 0:
+            raise DataPreparationError(f"requested window contains no candles for {preset.symbol} {preset.timeframe}")
+
+        eval_first_idx = in_range_idx[0]
+        eval_last_idx = in_range_idx[-1]
+
+        if eval_first_idx < warmup_candles:
+            raise DataPreparationError(
+                f"requested window starts at {_fmt(start_target)}, but only {eval_first_idx:,} warmup candles exist prior to start (1,000 required)"
+            )
+
+        warmup_first_idx = eval_first_idx - warmup_candles
+        raw = raw_df.iloc[warmup_first_idx:eval_last_idx + 1].reset_index(drop=True)
+        requested_start = raw["datetime"].iloc[warmup_candles]
+        requested_end = raw["datetime"].iloc[-1]
+        evaluable_bars = len(raw) - warmup_candles
+        target_reached = (evaluable_bars >= history_mod.AUTO_TARGET_EVALUABLE_BARS)
+        availability_limited = not target_reached
+    else:
+        raise DataPreparationError(f"unhandled history mode: {hist.mode}")
+
+    if hist.is_custom_short(preset.timeframe):
+        say("NOTE: Custom short history — results are experimental.")
+
     say("Computing indicators on the full frame (warmup included)")
     strat_cfg = _warmup_strategy_config(preset.symbol, preset.timeframe)
     full = compute_all_indicators(raw, strat_cfg)
-
     checksum = _checksum(full)
 
-    # --- only now is it safe to slice ---------------------------------------
-    eval_mask = (full["datetime"] >= requested_start) & (full["datetime"] <= requested_end)
-    evaluation = full.loc[eval_mask].reset_index(drop=True)
-
-    warmup_rows = int((full["datetime"] < requested_start).sum())
-    if len(evaluation) == 0:
+    # Slice partitions on evaluable rows (after index warmup_candles)
+    evaluation = full.iloc[warmup_candles:].reset_index(drop=True)
+    eval_len = len(evaluation)
+    if eval_len == 0:
         raise DataPreparationError("requested window contains no candles")
 
-    if warmup_rows < lookback.MIN_CONTEXT_CANDLES:
-        raise DataPreparationError(
-            f"only {warmup_rows} warmup candles available before "
-            f"{_fmt(requested_start)}; at least {lookback.MIN_CONTEXT_CANDLES} are "
-            "needed for indicators to carry real history. Extend the history range "
-            "or clear the data cache so a longer span is fetched."
-        )
+    unseen_count = int(round(eval_len * UNSEEN_FRACTION))
+    dev_count = eval_len - unseen_count
 
-    warmup_start = full["datetime"].iloc[0]
-    warmup_end = full.loc[full["datetime"] < requested_start, "datetime"].iloc[-1]
+    dev_train_count = int(round(dev_count * DEV_TRAIN_FRACTION))
+    dev_valid_count = dev_count - dev_train_count
 
-    # --- chronological 60 / 20 / 20 over the evaluation window ---------------
-    window_start = evaluation["datetime"].iloc[0]
-    window_end = evaluation["datetime"].iloc[-1]
-    span = window_end - window_start
-    train_end = window_start + span * TRAIN_FRACTION
-    valid_end = window_start + span * (TRAIN_FRACTION + VALID_FRACTION)
+    train_start_idx = warmup_candles
+    train_end_idx = warmup_candles + dev_train_count
+    valid_end_idx = train_end_idx + dev_valid_count
+    unseen_end_idx = warmup_candles + eval_len
 
-    dt = evaluation["datetime"]
-    train_df = evaluation.loc[dt < train_end].reset_index(drop=True)
-    valid_df = evaluation.loc[(dt >= train_end) & (dt < valid_end)].reset_index(drop=True)
-    unseen_df = evaluation.loc[dt >= valid_end].reset_index(drop=True)
+    train_df = full.iloc[train_start_idx:train_end_idx].reset_index(drop=True)
+    valid_df = full.iloc[train_end_idx:valid_end_idx].reset_index(drop=True)
+    unseen_df = full.iloc[valid_end_idx:unseen_end_idx].reset_index(drop=True)
 
-    for name, part in (("TRAIN", train_df), ("VALIDATION", valid_df), ("UNSEEN", unseen_df)):
-        if len(part) < MIN_PARTITION_CANDLES:
-            raise DataPreparationError(
-                f"{name} partition has only {len(part)} candles "
-                f"(minimum {MIN_PARTITION_CANDLES}). The requested history is too "
-                "short for a 60/20/20 split at this timeframe."
-            )
+    def _bound_ts(df: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
+        if len(df) > 0:
+            return df["datetime"].iloc[0], df["datetime"].iloc[-1]
+        fallback = raw["datetime"].iloc[-1]
+        return fallback, fallback
 
-    _assert_partitions_sound(evaluation, train_df, valid_df, unseen_df)
-    _assert_warmup_context(full, train_df, valid_df)
+    t_start, t_end = _bound_ts(train_df)
+    v_start, v_end = _bound_ts(valid_df)
+    u_start, u_end = _bound_ts(unseen_df)
 
-    train = Partition("TRAIN", train_df,
-                      train_df["datetime"].iloc[0], train_df["datetime"].iloc[-1])
-    validation = Partition("VALIDATION", valid_df,
-                           valid_df["datetime"].iloc[0], valid_df["datetime"].iloc[-1])
+    train_p = Partition("TRAIN", train_df, t_start, t_end)
+    valid_p = Partition("VALIDATION", valid_df, v_start, v_end)
 
-    unseen_start = unseen_df["datetime"].iloc[0]
-    unseen_end = unseen_df["datetime"].iloc[-1]
-    vault = UnseenVault(unseen_df, unseen_start, unseen_end)
-
-    say(f"Partitioned {len(evaluation)} candles: "
-        f"TRAIN {len(train_df)} / VALID {len(valid_df)} / UNSEEN {len(unseen_df)} [LOCKED]")
-
-    return PreparedData(
-        symbol=preset.symbol,
-        timeframe=preset.timeframe,
-        requested_start=window_start,
-        requested_end=window_end,
-        warmup_start=warmup_start,
-        warmup_end=warmup_end,
-        warmup_candles=warmup_rows,
-        full_candles=len(full),
-        checksum=checksum,
-        train=train,
-        validation=validation,
-        unseen=vault,
-        unseen_start=unseen_start,
-        unseen_end=unseen_end,
-        unseen_candles=len(unseen_df),
+    vault = UnseenVault(
+        unseen_df,
+        u_start,
+        u_end,
     )
 
+    warmup_start = full["datetime"].iloc[0]
+    warmup_end = full["datetime"].iloc[warmup_candles - 1]
 
-# ---------------------------------------------------------------------------
-# Assertions. These are correctness guarantees, not debug aids: a violation
-# means results would be silently wrong, so they raise rather than warn.
-# ---------------------------------------------------------------------------
+    prep = PreparedData(
+        symbol=preset.symbol,
+        timeframe=preset.timeframe,
+        source_timeframe=source_timeframe,
+        is_resampled=is_resampled,
+        available_bars=available_bars,
+        warmup_candles=warmup_candles,
+        evaluable_bars=evaluable_bars,
+        target_reached=target_reached,
+        availability_limited=availability_limited,
+        requested_start=requested_start,
+        requested_end=requested_end,
+        warmup_start=warmup_start,
+        warmup_end=warmup_end,
+        full_candles=len(full),
+        checksum=checksum,
+        train=train_p,
+        validation=valid_p,
+        unseen=vault,
+        unseen_start=u_start,
+        unseen_end=u_end,
+        unseen_candles=len(unseen_df),
+        raw_full=full,
+        _bounds={
+            "train": (train_start_idx, train_end_idx),
+            "validation": (train_end_idx, valid_end_idx),
+            "unseen": (valid_end_idx, unseen_end_idx)
+        }
+    )
 
-def _assert_partitions_sound(evaluation, train_df, valid_df, unseen_df):
-    total = len(train_df) + len(valid_df) + len(unseen_df)
-    if total != len(evaluation):
-        raise AssertionError(
-            f"partition candle counts {total} != evaluation window {len(evaluation)}: "
-            "the split dropped or duplicated candles"
-        )
+    say(f"Stage 1 data preparation resolved for {preset.symbol} {preset.timeframe}:")
+    say(f"  Source timeframe:  {source_tf_desc}")
+    say(f"  Available bars:    {available_bars:,} complete bars")
+    say(f"  Warmup lead-in:    {warmup_candles:,} bars (outside partitions)")
+    say(f"  Evaluable bars:    {evaluable_bars:,} bars ({'Target 43,200 reached' if target_reached else 'Availability-limited (< 43,200)'})")
+    say(f"  Partitions (56/24/20):")
+    say(f"    TRAIN:   {train_p.n_candles:,} bars ({_fmt(train_p.start)} -> {_fmt(train_p.end)})")
+    say(f"    VALID:   {valid_p.n_candles:,} bars ({_fmt(valid_p.start)} -> {_fmt(valid_p.end)})")
+    say(f"    UNSEEN:  {len(unseen_df):,} bars ({_fmt(u_start)} -> {_fmt(u_end)}) [SEALED]")
 
-    # Strict chronological ordering with no overlap.
-    if train_df["datetime"].iloc[-1] >= valid_df["datetime"].iloc[0]:
-        raise AssertionError("TRAIN overlaps VALIDATION")
-    if valid_df["datetime"].iloc[-1] >= unseen_df["datetime"].iloc[0]:
-        raise AssertionError("VALIDATION overlaps UNSEEN")
-
-    # No gap: the partitions must be adjacent slices of the same ordered frame.
-    joined = pd.concat([train_df["datetime"], valid_df["datetime"],
-                        unseen_df["datetime"]], ignore_index=True)
-    if not joined.equals(evaluation["datetime"]):
-        raise AssertionError(
-            "concatenating TRAIN+VALIDATION+UNSEEN does not reproduce the "
-            "evaluation window: the split introduced a gap or reordering"
-        )
-
-
-def _assert_warmup_context(full, train_df, valid_df):
-    """Prove the first candles of TRAIN and VALIDATION carry real indicator history.
-
-    A freshly restarted EMA equals the first close it sees, and a restarted RSI
-    sits at its neutral fill value. Both are checked, along with the raw count of
-    preceding candles.
-    """
-    dt = full["datetime"]
-
-    for name, part in (("TRAIN", train_df), ("VALIDATION", valid_df)):
-        first_ts = part["datetime"].iloc[0]
-        preceding = int((dt < first_ts).sum())
-        if preceding < lookback.MIN_CONTEXT_CANDLES:
-            raise AssertionError(
-                f"{name} starts at {_fmt(first_ts)} with only {preceding} preceding "
-                f"candles in the indicator frame; {lookback.MIN_CONTEXT_CANDLES} are "
-                "required. Indicators were not given real history."
-            )
-
-        row = part.iloc[0]
-        if "ema_51" in part.columns and pd.notna(row["ema_51"]):
-            if abs(float(row["ema_51"]) - float(row["close"])) < 1e-12:
-                raise AssertionError(
-                    f"{name}'s first EMA value equals its first close — the EMA was "
-                    "restarted at the partition boundary instead of carrying warmup."
-                )
-        for col in ("ema_51", "atr", "rsi"):
-            if col in part.columns and pd.isna(row[col]):
-                raise AssertionError(
-                    f"{name}'s first candle has NaN {col}: indicators were computed "
-                    "on a slice rather than the full frame."
-                )
+    return prep

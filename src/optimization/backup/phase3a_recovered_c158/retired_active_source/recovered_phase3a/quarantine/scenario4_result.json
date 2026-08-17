@@ -1,0 +1,43 @@
+{
+  "elapsed_seconds": 259.0,
+  "winner_trial": 285,
+  "winner_score": 1.3203451017375738,
+  "train_trades": 152,
+  "valid_trades": 59,
+  "credible": [
+    257,
+    300
+  ],
+  "bollinger_trial": 66,
+  "bollinger_score": 0.572694611532815,
+  "strategy_risk": {
+    "ema_period": 104.0,
+    "rsi_period": 20.0,
+    "rsi_overbought": 64.0,
+    "rsi_oversold": 23.0,
+    "atr_period": 7.0,
+    "consolidation_candles": 7.0,
+    "consolidation_atr_mult": 2.8,
+    "swing_lookback": 17.0,
+    "volume_sma_period": 12.0,
+    "volume_mult": 1.8,
+    "risk_reward_ratio": 3.6,
+    "risk_per_trade_pct": 0.026000000000000002,
+    "max_position_allocation_pct": 0.7,
+    "leverage": 4.0
+  },
+  "bollinger": {
+    "enabled": true,
+    "length": 10,
+    "std": 2.3,
+    "min_bandwidth_pct": 0.2,
+    "expansion_lookback": 10,
+    "expansion_min_ratio": 0.9500000000000001,
+    "min_mid_distance": 0.15
+  },
+  "regenerated_exactly": true,
+  "mismatches": [],
+  "unlock_unseen_called": false,
+  "dev_boundary_row": 160128,
+  "dev_end": "2026-07-15 23:45:00+00:00"
+}

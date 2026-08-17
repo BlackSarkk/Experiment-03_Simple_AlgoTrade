@@ -13,9 +13,9 @@ import time
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from auto_optimise import output_guard, preset as preset_mod, runplan, ui
+    from auto_optimise import output_guard, preset as preset_mod, ui, v3_runplan
 else:
-    from . import output_guard, preset as preset_mod, runplan, ui
+    from . import output_guard, preset as preset_mod, ui, v3_runplan
 
 USAGE = """\
 ./pipeline.sh --optimize --<preset>.json --<output>.json
@@ -24,18 +24,29 @@ USAGE = """\
   --<output>.json   runnable strategy config to create in configs/config/
                     MANDATORY. Never auto-generated, never overwritten.
 
+  --plan-only       validate and print the run plan, then stop before stage 1
+  --no-resume       ignore any existing run directory and start a fresh campaign
+
 Example:
   ./pipeline.sh --optimize --odefault.json --mywinner.json
 """
 
 
 def _parse(argv):
-    """Return (preset_arg, output_arg). Extra positional .json args are an error."""
+    """Return (preset_arg, output_arg, plan_only, no_resume)."""
     names = []
+    plan_only = False
+    no_resume = False
     for token in argv:
         if token in ("--help", "-h"):
             print(USAGE)
             sys.exit(0)
+        if token == "--plan-only":
+            plan_only = True
+            continue
+        if token == "--no-resume":
+            no_resume = True
+            continue
         if token.startswith("--") and token.endswith(".json") and "=" not in token:
             names.append(token[2:])
         else:
@@ -55,12 +66,12 @@ def _parse(argv):
             + ", ".join(names),
             USAGE.strip(),
         )
-    return names[0], names[1]
+    return names[0], names[1], plan_only, no_resume
 
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    preset_arg, output_arg = _parse(argv)
+    preset_arg, output_arg, plan_only, no_resume = _parse(argv)
 
     try:
         loaded = preset_mod.load(preset_arg)
@@ -72,28 +83,32 @@ def main(argv=None) -> int:
     except output_guard.OutputNameError as exc:
         ui.error_exit(str(exc))
 
-    print(runplan.render(loaded, target))
+    if plan_only:
+        # Budgets, partition policy and the market-rule RULE are shown without a
+        # single network call, Optuna study or file write.
+        print(v3_runplan.render(loaded, target))
+        print(ui.dim("\n--plan-only: stopping before any stage runs. "
+                     "No data was loaded, no trial ran, nothing was written."))
+        return 0
 
-    # ---- stage [1/6] -------------------------------------------------------
+    # ---- run the campaign --------------------------------------------------
     # Imported here so preset/output validation errors never pay the cost of
     # loading pandas and the trading stack.
     if __package__ in (None, ""):
-        from auto_optimise import dataprep
+        from auto_optimise import dataprep, v3_controller
     else:
-        from . import dataprep
+        from . import dataprep, v3_controller
 
-    print("")
-    print(ui.info("[1/6] Data Preparation") + ui.dim("  running..."))
-    started = time.time()
     try:
-        prepared = dataprep.prepare(loaded, progress=lambda m: print("      " + ui.dim(m)))
+        summary = v3_controller.run_campaign(loaded, target, resume=not no_resume)
     except dataprep.DataPreparationError as exc:
         ui.error_exit(str(exc))
+    except FileNotFoundError as exc:
+        ui.error_exit(str(exc))
     except AssertionError as exc:
-        ui.error_exit(f"data preparation invariant violated: {exc}")
+        ui.error_exit(f"pipeline invariant violated: {exc}")
 
-    print(runplan.render_stage_report(loaded, prepared, time.time() - started))
-    return 0
+    return 1 if summary.get("failed_at") else 0
 
 
 if __name__ == "__main__":

@@ -1,0 +1,76 @@
+{
+  "_name": "Recovered recipe (unseeded) \u2014 ETH 15m DEV winner + Bollinger ON",
+  "_description": "Phase-12 parity experiment. Optimized on DEV 2024-07-16..2026-05-31 only (300 strategy+risk trials, then 150 Bollinger trials, TPE seed 42, n_jobs=1). TEST 2026-06-01..2026-08-16 was sealed and measured once, after selection.",
+  "_source": "phase12_results.json :: recovered, strategy trial 264 (score 1.0226, eligible 254/300), Bollinger trial 146",
+  "_optimizer_architecture": "RECOVERED-UNSEEDED (campaign_2y_15m scenario-4 flow, enqueue removed)",
+  "_symbol": "ETHUSDT",
+  "_tradingview_symbol": "BINANCE:ETHUSDT.P",
+  "_timeframe": "15m",
+  "_direction": "LONG_ONLY",
+  "_development_start": "2024-07-16",
+  "_development_end": "2026-05-31",
+  "_unseen_start": "2026-06-01",
+  "_unseen_end": "2026-08-16",
+  "_notes": "Not a promoted winner. Sealed-TEST figures below were produced once, after selection, and were NOT used to choose or retune anything. Metadata is informational only.",
+  "_reference_metrics": {
+    "development_return_pct": 230.52,
+    "development_pf": 1.889,
+    "development_max_dd_pct": 21.03,
+    "development_trades": 134,
+    "unseen_filter_off": {
+      "return_pct": -0.44,
+      "pf": 0.981,
+      "max_dd_pct": 10.21,
+      "trades": 23
+    },
+    "unseen_filter_on": {
+      "return_pct": 0.77,
+      "pf": 1.052,
+      "max_dd_pct": 8.49,
+      "trades": 15
+    }
+  },
+  "_risk_policy": "preset",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 110,
+    "rsi_period": 16,
+    "rsi_overbought": 62.0,
+    "rsi_oversold": 31.0,
+    "atr_period": 13,
+    "consolidation_candles": 16,
+    "consolidation_atr_mult": 3.8000000000000003,
+    "swing_lookback": 18,
+    "volume_sma_period": 25,
+    "volume_mult": 1.7000000000000002,
+    "risk_reward_ratio": 2.3,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "leverage": 2.5,
+    "risk_per_trade_pct": 3.0,
+    "max_position_allocation_pct": 60.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": true,
+      "length": 12,
+      "std": 2.6,
+      "min_bandwidth_pct": 0.1,
+      "expansion_lookback": 12,
+      "expansion_min_ratio": 0.15000000000000002,
+      "min_mid_distance": 0.28
+    }
+  }
+}

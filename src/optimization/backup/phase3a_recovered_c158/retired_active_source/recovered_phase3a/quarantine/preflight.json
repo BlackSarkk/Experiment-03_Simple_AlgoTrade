@@ -1,0 +1,87 @@
+{
+  "preflight": [
+    {
+      "check": "no row at/after 2026-07-16 loaded",
+      "pass": true,
+      "detail": "rows >= lock boundary: 0   max loaded: 2026-07-15 23:45:00+00:00"
+    },
+    {
+      "check": "no fetch path can execute",
+      "pass": true,
+      "detail": "MarketDataLoader.__init__ patched to raise; verified by trial construction. campaign.load_data() is never called by this harness."
+    },
+    {
+      "check": "no locked frame in memory",
+      "pass": true,
+      "detail": "cache itself holds 0 locked rows; raw=160128 loaded=160128"
+    },
+    {
+      "check": "unlock_unseen not called",
+      "pass": true,
+      "detail": "campaign._UNLOCKED = False"
+    },
+    {
+      "check": "seed strategy == Trial #53",
+      "pass": true,
+      "detail": "105/18/80/33/11/14/3.3/8/32/1.5/2.7"
+    },
+    {
+      "check": "seed risk == Risk Trial #158",
+      "pass": true,
+      "detail": "5.0x / 1.7% / 28%"
+    },
+    {
+      "check": "budgets 300 / 150",
+      "pass": true,
+      "detail": "STRAT_TRIALS=300 BOLL_TRIALS=150"
+    },
+    {
+      "check": "credible filter 100 / 40",
+      "pass": true,
+      "detail": "100 / 40"
+    },
+    {
+      "check": "seed 42, TRAIN_FRAC 0.70",
+      "pass": true,
+      "detail": "SEED=42 TRAIN_FRAC=0.7"
+    },
+    {
+      "check": "DEV start aligns with history",
+      "pass": true,
+      "detail": "2024-07-16 00:00:00+00:00  (historical 2024-07-16 00:00:00+00:00)"
+    },
+    {
+      "check": "DEV is exactly the historical period",
+      "pass": true,
+      "detail": "DEV rows 70,080 vs historical 70,080; DEV ends 2026-07-15 23:45:00+00:00 vs historical 2026-07-15 23:45:00+00:00"
+    }
+  ],
+  "preflight_pass": true,
+  "loaded": {
+    "rows": 160128,
+    "start": "2021-12-21 00:00:00+00:00",
+    "end": "2026-07-15 23:45:00+00:00",
+    "locked_rows_loaded": 0
+  },
+  "boundaries": {
+    "dev_lo": 90048,
+    "train_hi": 139104,
+    "dev_hi": 160128
+  },
+  "historical_boundaries": {
+    "n": 161953,
+    "dev_lo": 88992,
+    "tr_hi": 138048,
+    "dev_hi": 159072,
+    "train_span": [
+      "2024-07-16 00:00:00+00:00",
+      "2025-12-08 23:45:00+00:00"
+    ],
+    "valid_span": [
+      "2025-12-09 00:00:00+00:00",
+      "2026-07-15 23:45:00+00:00"
+    ]
+  },
+  "fetched_any_data": false,
+  "unlock_unseen_called": false
+}

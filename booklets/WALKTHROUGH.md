@@ -355,7 +355,8 @@ reorders it.
 
 ```
 resolve history -> load/download -> compute indicators on the FULL warmup+window
-frame -> slice the evaluation window -> split 60/20/20 -> expose TRAIN + VALIDATION,
+frame -> slice the evaluation window -> reserve the final 20% as sealed UNSEEN ->
+split the remaining DEV 70/30 -> expose TRAIN + VALIDATION,
 seal UNSEEN
 ```
 
@@ -380,8 +381,119 @@ has `__slots__` and no `__dict__`, and pickling, copying and iteration all raise
 `unlock(reason)`, which is one-way and recorded. Row count and date bounds stay
 readable while locked so the run plan can report them.
 
+### The five V3 stages (implemented)
+
+The optimizer does not contain its own search mathematics. It imports the canonical
+package `src/optimization/v3/` and drives it; every range, gate, score weight,
+sampler and selection rule lives there. If a number in `auto_optimise` ever
+disagrees with V3, V3 wins.
+
+Optuna/TPE (seed 42, `n_jobs=1`) proposes parameters; each trial is simulated by the
+**production** `BacktestEngine` driving the production `BaselineStrategy` and
+`BaselineRiskManager`. There is no research backtester.
+
+| stage | dims | risk policy | notes |
+|---|---|---|---|
+| 1a broad strategy | 11 | neutral 1.0x / 1.5% / 50% | sizing-neutral, so no candidate out-ranks another by sizing harder |
+| 1b narrowed strategy | 11 | neutral | ranges derived from the top gated 1a trials, widened one step, clipped to the 1a bounds |
+| 1c risk-only | 3 | searched | strategy frozen; leverage / risk / allocation only |
+| 2a final joint | 14 | searched | the discovered seed is enqueued as trial 0, then the space is re-opened jointly |
+| 2b Bollinger | 6 | frozen | strategy and risk frozen; ships the filter OFF if nothing clears the gate |
+
+Stage 1 emits exactly one 14-dimension seed. Stage 2a may or may not keep it — the
+seed competes as trial 0 and is beaten on its merits or not at all.
+
+**Trial budget.** The human writes one TOTAL. `1850` allocates exactly
+400 / 800 / 200 / 300 / 150. Any other integer scales that reference allocation
+deterministically (largest-remainder, then documented per-stage floors), and always
+sums to the requested total exactly. `"auto"` resolves a documented total from the
+timeframe and history length. The five resolved budgets are printed in the run plan
+before anything runs. Per-stage budgets are never preset fields.
+
+**Stage toggles.** `strategy_optimization` is required — a run cannot start without
+it, because 1a/1b produce the seed the later stages search around. `risk_management`
+controls 1c and the risk half of 2a; when it is off the seed keeps the neutral risk
+policy and the emitted config records `_risk_optimized: false`, so a skipped risk
+stage is never described as risk-optimized. `bollinger` controls 2b only. Every
+skipped stage appears as SKIPPED in the run plan, the manifest, the config metadata
+and the terminal result.
+
+**Market rules.** `execution.tick_size` is `"auto"` by default and resolves once,
+during data preparation, from Binance Futures `PRICE_FILTER.tickSize` for the
+symbol. A numeric override is validated against the same metadata and rejected
+unless it is a positive whole multiple of the exchange tick. The quantity step comes
+from `LOT_SIZE.stepSize` and is not a preset field. Both resolved values are written
+into the manifest and the emitted config. Tick size is a property of the symbol and
+is never derived from the timeframe; there is no per-symbol map in this repo.
+
+**TRAIN / VALID / UNSEEN discipline.** UNSEEN is carved off the end of the window,
+locked in the vault, and **physically removed** from the frame handed to V3 — the
+DEV frame is sliced at the UNSEEN boundary before `Campaign` is constructed, so no
+stage can address those rows even by index. V3's own data contract asserts the same
+thing and has no unlock path. The vault is asserted locked before and after the
+search.
+
+UNSEEN is opened exactly once, by `v3_confirm.confirm`, after the winner and the
+Bollinger filter are frozen. Its metrics are recorded as `CONFIRMATION_ONLY` and
+there is no path from that result back into any search, narrowing, seed, risk or
+Bollinger stage. If UNSEEN disappoints, the honest outcome is a config whose
+manifest says so — not a retune.
+
+**Partition policy (canonical).**
+
+    full requested history
+      -> reserve the final 20% chronologically as sealed UNSEEN
+      -> the remaining 80% is DEV
+      -> V3's existing 70/30 split applies WITHIN DEV
+
+    Effective full-history split:  TRAIN 56% / VALID 24% / UNSEEN 20%
+
+UNSEEN is reserved **first**, before DEV is divided at all, and is physically removed
+from the frame V3 receives. It stays inaccessible until the single final
+confirmation, after the winner is frozen.
+
+Generic V3 runs are never described with a single three-way ratio taken from an
+older policy. Both views are always displayed —
+the DEV-local 70/30 and the effective full-history 56/24/20 — because quoting only
+one of them is what makes partition documentation misleading. The DEV-local ratio is
+read from `optimization.v3.spec.TRAIN_FRAC`, never hardcoded, so this layer cannot
+drift from the search that actually runs, and the split is applied BY ROW COUNT
+exactly as `Campaign.__init__` applies it.
+
+`partition.unseen_start` remains available as an **explicit reproduction override
+only** — it pins the UNSEEN boundary to an exact date so a historical campaign such
+as Phase-16 can be reproduced. It is not a tuning knob, and the emitted config
+records which of the two sources set the boundary.
+
+Actual partition dates, row counts and both ratio views are written into every
+manifest and every emitted config.
+
+**Direction.** One shared strategy/risk parameter vector, always. With
+`long_enabled` and `short_enabled` both true, each trial runs a SINGLE
+`BacktestEngine` simulation with both directions enabled and the combined result is
+scored — one study, one winner, no side-specific parameters and no parallel
+campaigns. With one side enabled, only that side is evaluated. The emitted config
+preserves the preset's direction flags exactly.
+
+**Artifacts** land in `results/auto_optimise/<run_id>/`: `v3_manifest.json` (preset
+snapshot, environment including NumPy and Optuna versions, market-rule snapshot,
+data checksum, partition boundaries, total and per-stage budgets), the five trial
+ledgers `v3_stage1a_broad.csv` … `v3_stage2b_bollinger.csv`, `v3_seed.json`,
+`v3_unseen_confirmation.json` and `v3_final_config.json`.
+
+**The output config** is written only after every enabled stage succeeded. It carries
+the frozen strategy / risk / execution / Bollinger values, the resolved tick size and
+quantity step, the direction from the preset, the source preset and run metadata, the
+total and per-stage budgets, the exact warmup and partition dates and row counts, the
+pre-UNSEEN winner, and the UNSEEN result clearly marked as confirmation only. It is
+runnable by the ordinary backtest and forward-test commands.
+
+`--plan-only` validates and prints the run plan — budgets, market-rule resolution
+policy and partition policy — without a network call, an Optuna study, a data load or
+any file write.
+
 ### Current status
 
-Stage 1 runs. Stages 2-6 print `NOT IMPLEMENTED`. No Optuna search, ranking, risk
-stage, Bollinger stage or UNSEEN unlocking exists yet, and no output config is
-written because no winner exists.
+Implemented end to end. `./pipeline.sh --optimize --<preset>.json --<output>.json`
+runs all five V3 stages, opens UNSEEN once for confirmation, and writes the requested
+config.

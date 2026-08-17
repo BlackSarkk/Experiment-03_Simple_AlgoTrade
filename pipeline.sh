@@ -15,6 +15,8 @@ EXECUTION_MODE="REFERENCE"               # "REFERENCE" or "REALISTIC"
 EXECUTION_SUPPLIED=false
 OPTIMIZE=false
 OPTIMIZE_ARGS=()
+PINE=false
+PINE_ARGS=()
 
 # Default Flags (SAFE DEFAULTS: RESET=false, CLEAR_CACHE=false, CLEAR_CACHE_ONLY=false)
 CLEAR_CACHE_ONLY=${CLEAR_CACHE_ONLY:-false}
@@ -29,7 +31,7 @@ FORWARD_TEST=${FORWARD_TEST:-false}
 FORWARD_MODE=${FORWARD_MODE:-"PAPER"}
 RESUME_FORWARD_STATE=${RESUME_FORWARD_STATE:-true}
 
-KNOWN_FLAGS=(--backtest --forward-test --historical-replay --robustness --optimize
+KNOWN_FLAGS=(--backtest --forward-test --historical-replay --robustness --optimize --pine
              --config --reset --hard-reset --clear-cache --reset-cache
              --clear-cache-only --resume --help)
 
@@ -125,12 +127,29 @@ while [[ $# -gt 0 ]]; do
       while [[ $# -gt 0 ]]; do
         case $1 in
           --backtest|--forward-test|--historical-replay|--robustness|--config|--config=*|\
-          --reset|--hard-reset|--clear-cache|--reset-cache|--clear-cache-only|--resume)
+          --reset|--hard-reset|--clear-cache|--reset-cache|--clear-cache-only|--resume|--pine)
             OPTIMIZE_CONFLICT="$1"
             shift
             ;;
           *)
             OPTIMIZE_ARGS+=("$1")
+            shift
+            ;;
+        esac
+      done
+      ;;
+    --pine)
+      PINE=true
+      shift
+      while [[ $# -gt 0 ]]; do
+        case $1 in
+          --backtest|--forward-test|--historical-replay|--robustness|--config|--config=*|\
+          --reset|--hard-reset|--clear-cache|--reset-cache|--clear-cache-only|--resume|--optimize)
+            PINE_CONFLICT="$1"
+            shift
+            ;;
+          *)
+            PINE_ARGS+=("$1")
             shift
             ;;
         esac
@@ -262,6 +281,80 @@ if [ "$OPTIMIZE" = true ]; then
     exit 1
   fi
   exec .venv/bin/python3 src/auto_optimise/cli.py ${OPTIMIZE_ARGS[@]+"${OPTIMIZE_ARGS[@]}"}
+fi
+
+# ------------------------------------------------------------------
+# Pine Export mode. Dedicated single-config Pine export pipeline.
+# ------------------------------------------------------------------
+if [ "$PINE" = true ]; then
+  if [ -z "${PINE_CONFLICT:-}" ]; then
+    if [ "$BACKTEST" = true ];      then PINE_CONFLICT="--backtest"; fi
+    if [ "$FORWARD_TEST" = true ];  then PINE_CONFLICT="--forward-test"; fi
+    if [ "$ROBUSTNESS" = true ];    then PINE_CONFLICT="--robustness"; fi
+    if [ "$CONFIG_SUPPLIED" = true ]; then PINE_CONFLICT="--config"; fi
+    if [ "$RESET" = true ];         then PINE_CONFLICT="--reset"; fi
+    if [ "$HARD_RESET" = true ];    then PINE_CONFLICT="--hard-reset"; fi
+    if [ "$CLEAR_CACHE" = true ];   then PINE_CONFLICT="--clear-cache"; fi
+    if [ "$CLEAR_CACHE_ONLY" = true ]; then PINE_CONFLICT="--clear-cache-only"; fi
+    if [ "$OPTIMIZE" = true ];      then PINE_CONFLICT="--optimize"; fi
+  fi
+  if [ -n "${PINE_CONFLICT:-}" ]; then
+    echo "ERROR: --pine cannot be combined with $PINE_CONFLICT" >&2
+    echo "       Pine export mode is exclusive. Run it on its own:" >&2
+    echo "         ./pipeline.sh --pine --config1input.json --config1output.pine" >&2
+    exit 1
+  fi
+
+  if [ ${#PINE_ARGS[@]} -ne 2 ]; then
+    echo "ERROR: --pine requires exactly two arguments: --<input>.json --<output>.pine" >&2
+    echo "       Example: ./pipeline.sh --pine --config1input.json --config1output.pine" >&2
+    exit 1
+  fi
+
+  RAW_IN="${PINE_ARGS[0]}"
+  RAW_OUT="${PINE_ARGS[1]}"
+
+  IN_FILE="${RAW_IN#--}"
+  OUT_FILE="${RAW_OUT#--}"
+
+  if [[ "$IN_FILE" == *"/"* || "$IN_FILE" == *"\\"* || "$IN_FILE" == *".."* ]]; then
+    echo "ERROR: input filename contains path separators or '..': $IN_FILE" >&2
+    exit 1
+  fi
+
+  if [[ "$IN_FILE" != *.json ]]; then
+    echo "ERROR: input filename must end with .json: $IN_FILE" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "configs/config/$IN_FILE" ]]; then
+    echo "ERROR: input config file does not exist: configs/config/$IN_FILE" >&2
+    exit 1
+  fi
+
+  if [[ "$OUT_FILE" == *"/"* || "$OUT_FILE" == *"\\"* || "$OUT_FILE" == *".."* ]]; then
+    echo "ERROR: output filename contains path separators or '..': $OUT_FILE" >&2
+    exit 1
+  fi
+
+  if [[ "$OUT_FILE" != *.pine ]]; then
+    echo "ERROR: output filename must end with .pine: $OUT_FILE" >&2
+    exit 1
+  fi
+
+  if [[ -f "pine/$OUT_FILE" ]]; then
+    echo "ERROR: output file already exists: pine/$OUT_FILE" >&2
+    exit 1
+  fi
+
+  if .venv/bin/python3 tools/generate_pine.py --config "$IN_FILE" --out "$OUT_FILE"; then
+    echo "Pine export complete"
+    echo "Input:  configs/config/$IN_FILE"
+    echo "Output: pine/$OUT_FILE"
+    exit 0
+  else
+    exit 1
+  fi
 fi
 
 # ------------------------------------------------------------------

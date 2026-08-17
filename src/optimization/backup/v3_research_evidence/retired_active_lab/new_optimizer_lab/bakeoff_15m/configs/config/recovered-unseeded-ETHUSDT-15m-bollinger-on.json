@@ -1,0 +1,100 @@
+{
+  "_name": "Recovered recipe (unseeded) \u2014 ETHUSDT 15m winner + Bollinger ON",
+  "_description": "Phase-8 bakeoff: recovered Scenario-4 recipe run UNSEEDED, 300 strategy+risk trials then 150 Bollinger trials, TPE seed 42, n_jobs=1. NOT Candidate #158 and NOT a promoted winner.",
+  "_source": "bakeoff_15m/bakeoff_results.json :: recovered x ETHUSDT, strategy trial 279 (score 1.5884, credible 260/300), Bollinger trial 147",
+  "_optimizer_architecture": "RECOVERED-UNSEEDED (campaign_2y_15m scenario-4 flow, enqueue removed)",
+  "_symbol": "ETHUSDT",
+  "_tradingview_symbol": "BINANCE:ETHUSDT.P",
+  "_timeframe": "15m",
+  "_direction": "LONG_ONLY",
+  "_development_start": "2024-07-16",
+  "_development_end": "2026-07-15",
+  "_unseen_start": null,
+  "_unseen_end": null,
+  "_notes": "Reused-historical-DEV result. No holdout/unseen partition was evaluated for this configuration; unseen fields are intentionally absent. Metadata is informational only.",
+  "_reference_metrics": {
+    "development_return_pct": 538.51,
+    "development_pf": 1.503,
+    "development_max_dd_pct": 30.82,
+    "development_trades": 267,
+    "development_filter_off": {
+      "return_pct": 400.38,
+      "pf": 1.334,
+      "max_dd_pct": 28.59,
+      "trades": 305
+    },
+    "train": {
+      "return_pct": 175.071,
+      "net_pnl": 17507.078,
+      "gross_profit": 82475.76,
+      "gross_loss": 64968.7,
+      "pf": 1.269,
+      "sharpe": 1.805,
+      "max_dd": 28.594,
+      "trades": 212,
+      "wins": 76,
+      "losses": 136,
+      "win_rate": 35.849,
+      "fees": 7909.79,
+      "blocked": 0
+    },
+    "valid": {
+      "return_pct": 81.908,
+      "net_pnl": 8190.835,
+      "gross_profit": 28200.55,
+      "gross_loss": 20009.7,
+      "pf": 1.409,
+      "sharpe": 2.275,
+      "max_dd": 20.298,
+      "trades": 93,
+      "wins": 36,
+      "losses": 57,
+      "win_rate": 38.71,
+      "fees": 2687.47,
+      "blocked": 0
+    }
+  },
+  "_risk_policy": "preset",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 49,
+    "rsi_period": 12,
+    "rsi_overbought": 66.0,
+    "rsi_oversold": 24.0,
+    "atr_period": 8,
+    "consolidation_candles": 12,
+    "consolidation_atr_mult": 3.2,
+    "swing_lookback": 18,
+    "volume_sma_period": 29,
+    "volume_mult": 1.4,
+    "risk_reward_ratio": 2.7,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "leverage": 4.0,
+    "risk_per_trade_pct": 2.6,
+    "max_position_allocation_pct": 65.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": true,
+      "length": 45,
+      "std": 3.0,
+      "min_bandwidth_pct": 0.30000000000000004,
+      "expansion_lookback": 8,
+      "expansion_min_ratio": 0.5,
+      "min_mid_distance": 0.02
+    }
+  }
+}

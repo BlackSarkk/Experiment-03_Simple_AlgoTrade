@@ -1,0 +1,160 @@
+{
+  "core_15m_long_optimizer.py": {
+    "recovered": true,
+    "all_edits_applied": true,
+    "path": "src/optimization/recovered_phase3a/core_15m_long_optimizer.py",
+    "bytes": 19339,
+    "lines": 447,
+    "sha256": "69a0c852d966fe75f85809f04a024604d7beb84b930a0020b50b1774aa21b5e0",
+    "steps": [
+      {
+        "ts": "2026-08-16T03:00:56.310Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_01HeR9oEsiXXHn8GuCrPQuRA",
+        "tool": "Write",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/core_15m_long_optimizer.py",
+        "kind": "create",
+        "bytes_before": 0,
+        "bytes_after": 17831,
+        "sha256_after": "be431a49a7c724038e69e26661f006f63ef1ca1296bd775db3577d8546821d27"
+      },
+      {
+        "ts": "2026-08-16T03:20:54.868Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_01CGbVnqQRdB2XM1759VoQXx",
+        "tool": "Edit",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/core_15m_long_optimizer.py",
+        "kind": "edit",
+        "applied": true,
+        "occurrences": 1,
+        "replace_all": false,
+        "bytes_before": 17831,
+        "bytes_after": 19287,
+        "old_len": 60,
+        "new_len": 1516,
+        "sha256_after": "6c2b6511ad49d35231568af2fa9b6ee5a14e6afa289174080037c138b5f8252f"
+      },
+      {
+        "ts": "2026-08-16T03:21:00.235Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_01PDtFG2rAVRJmmHzHWSsQFq",
+        "tool": "Edit",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/core_15m_long_optimizer.py",
+        "kind": "edit",
+        "applied": true,
+        "occurrences": 1,
+        "replace_all": false,
+        "bytes_before": 19287,
+        "bytes_after": 19339,
+        "old_len": 183,
+        "new_len": 235,
+        "sha256_after": "69a0c852d966fe75f85809f04a024604d7beb84b930a0020b50b1774aa21b5e0"
+      }
+    ]
+  },
+  "risk_policy_search_t53.py": {
+    "recovered": true,
+    "all_edits_applied": true,
+    "path": "src/optimization/recovered_phase3a/risk_policy_search_t53.py",
+    "bytes": 5060,
+    "lines": 120,
+    "sha256": "800ff184ca82b86a4ab9d08d90c9a20a45c06b4ab32b6c8da870d7e1c26595dd",
+    "steps": [
+      {
+        "ts": "2026-08-16T07:30:00.033Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_01BBQFvMxswpgLq2VMd2MZct",
+        "tool": "Write",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/risk_policy_search_t53.py",
+        "kind": "create",
+        "bytes_before": 0,
+        "bytes_after": 5060,
+        "sha256_after": "800ff184ca82b86a4ab9d08d90c9a20a45c06b4ab32b6c8da870d7e1c26595dd"
+      }
+    ]
+  },
+  "campaign_2y_15m.py": {
+    "recovered": true,
+    "all_edits_applied": true,
+    "path": "src/optimization/recovered_phase3a/campaign_2y_15m.py",
+    "bytes": 17993,
+    "lines": 363,
+    "sha256": "a89aee78d1971f574b1ef9029445f61939e730539a36b4864c3433881984f80f",
+    "steps": [
+      {
+        "ts": "2026-08-16T10:07:28.466Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_01D2z27PFioA9nfFeyLxAL4B",
+        "tool": "Write",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/campaign_2y_15m.py",
+        "kind": "create",
+        "bytes_before": 0,
+        "bytes_after": 17993,
+        "sha256_after": "a89aee78d1971f574b1ef9029445f61939e730539a36b4864c3433881984f80f"
+      }
+    ]
+  },
+  "stage3_neighbourhood.py": {
+    "recovered": true,
+    "all_edits_applied": true,
+    "path": "src/optimization/recovered_phase3a/stage3_neighbourhood.py",
+    "bytes": 5605,
+    "lines": 153,
+    "sha256": "aa253ac221c06cd77424ac1d86ab3a41bedbce56d3eb0c0f98c76cad7fae57e8",
+    "steps": [
+      {
+        "ts": "2026-08-16T06:53:07.102Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_017haZY739bHjSzjogvu5MWS",
+        "tool": "Write",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/stage3_neighbourhood.py",
+        "kind": "create",
+        "bytes_before": 0,
+        "bytes_after": 5605,
+        "sha256_after": "aa253ac221c06cd77424ac1d86ab3a41bedbce56d3eb0c0f98c76cad7fae57e8"
+      }
+    ]
+  },
+  "stage3_stable_region.py": {
+    "recovered": true,
+    "all_edits_applied": true,
+    "path": "src/optimization/recovered_phase3a/stage3_stable_region.py",
+    "bytes": 8844,
+    "lines": 218,
+    "sha256": "6c5bd3668831e5ba2f0308b00db4932c60e7e457a500dacb5b528d2f723a8f65",
+    "steps": [
+      {
+        "ts": "2026-08-16T07:02:14.097Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_017w9HcJ9aTwXNuJS9zwcU4x",
+        "tool": "Write",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/stage3_stable_region.py",
+        "kind": "create",
+        "bytes_before": 0,
+        "bytes_after": 8844,
+        "sha256_after": "6c5bd3668831e5ba2f0308b00db4932c60e7e457a500dacb5b528d2f723a8f65"
+      }
+    ]
+  },
+  "robustness_showdown.py": {
+    "recovered": true,
+    "all_edits_applied": true,
+    "path": "src/optimization/recovered_phase3a/robustness_showdown.py",
+    "bytes": 9316,
+    "lines": 209,
+    "sha256": "dc541971e62de909742fb288d82817acf8f419b209733dd7b65859cb65ebff6c",
+    "steps": [
+      {
+        "ts": "2026-08-16T07:45:08.171Z",
+        "session": "08facafa-c7e8-41a2-98d3-9ecebbd981fb.jsonl",
+        "tool_use_id": "toolu_01Sfu89K3pdWFEhPJR9T2qRo",
+        "tool": "Write",
+        "file_path": "/home/rahul/Documents/CodeBackup/algo-research/Experiment-03_Simple_AlgoTrade/src/optimization/robustness_showdown.py",
+        "kind": "create",
+        "bytes_before": 0,
+        "bytes_after": 9316,
+        "sha256_after": "dc541971e62de909742fb288d82817acf8f419b209733dd7b65859cb65ebff6c"
+      }
+    ]
+  }
+}

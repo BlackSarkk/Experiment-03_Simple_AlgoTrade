@@ -1,0 +1,76 @@
+{
+  "_name": "New Optimizer V2 \u2014 ETH 15m DEV winner + Bollinger ON",
+  "_description": "Phase-12 parity experiment. Optimized on DEV 2024-07-16..2026-05-31 only (300 strategy+risk trials, then 150 Bollinger trials, TPE seed 42, n_jobs=1). TEST 2026-06-01..2026-08-16 was sealed and measured once, after selection.",
+  "_source": "phase12_results.json :: v2, strategy trial 134 (score 0.4409, eligible 216/300), Bollinger trial 81",
+  "_optimizer_architecture": "NEW_OPTIMIZER_V2",
+  "_symbol": "ETHUSDT",
+  "_tradingview_symbol": "BINANCE:ETHUSDT.P",
+  "_timeframe": "15m",
+  "_direction": "LONG_ONLY",
+  "_development_start": "2024-07-16",
+  "_development_end": "2026-05-31",
+  "_unseen_start": "2026-06-01",
+  "_unseen_end": "2026-08-16",
+  "_notes": "Not a promoted winner. Sealed-TEST figures below were produced once, after selection, and were NOT used to choose or retune anything. Metadata is informational only.",
+  "_reference_metrics": {
+    "development_return_pct": null,
+    "development_pf": null,
+    "development_max_dd_pct": null,
+    "development_trades": null,
+    "unseen_filter_off": {
+      "return_pct": 1.05,
+      "pf": 1.046,
+      "max_dd_pct": 10.19,
+      "trades": 25
+    },
+    "unseen_filter_on": {
+      "return_pct": 13.16,
+      "pf": 2.795,
+      "max_dd_pct": 5.87,
+      "trades": 7
+    }
+  },
+  "_risk_policy": "preset",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 96,
+    "rsi_period": 21,
+    "rsi_overbought": 71.0,
+    "rsi_oversold": 27.0,
+    "atr_period": 11,
+    "consolidation_candles": 19,
+    "consolidation_atr_mult": 3.8000000000000003,
+    "swing_lookback": 19,
+    "volume_sma_period": 46,
+    "volume_mult": 1.7000000000000002,
+    "risk_reward_ratio": 2.3,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "leverage": 4.5,
+    "risk_per_trade_pct": 2.8,
+    "max_position_allocation_pct": 25.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": true,
+      "length": 23,
+      "std": 2.0,
+      "min_bandwidth_pct": 1.4000000000000001,
+      "expansion_lookback": 2,
+      "expansion_min_ratio": 0.05,
+      "min_mid_distance": 0.1
+    }
+  }
+}

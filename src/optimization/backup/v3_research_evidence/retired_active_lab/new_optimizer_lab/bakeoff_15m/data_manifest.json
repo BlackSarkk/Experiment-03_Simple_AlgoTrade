@@ -1,0 +1,32 @@
+{
+  "lock_boundary_exclusive": "2026-07-16 00:00:00+00:00",
+  "dev": [
+    "2024-07-16 00:00:00+00:00",
+    "2026-07-15 23:45:00+00:00"
+  ],
+  "warmup_candles": 1000,
+  "warmup_start": "2024-07-05 14:00:00+00:00",
+  "all_validations_passed": true,
+  "datasets": {
+    "ETHUSDT": {
+      "path": "/home/rahul/Documents/Claude/Experiment-03_Simple_AlgoTrade/src/optimization/new_optimizer_lab/bakeoff_15m/data/ETHUSDT_15m_warmup1000_dev.csv",
+      "rows": 71080,
+      "warmup_rows": 1000,
+      "dev_rows": 70080,
+      "start": "2024-07-05 14:00:00+00:00",
+      "end": "2026-07-15 23:45:00+00:00",
+      "sha256": "62e9f9f3a97eb3e37f18690a49b55db9a98987d4be0d4c03f96cac4b404fc644",
+      "source": "sliced from quarantine ETH dataset (no fetch)"
+    },
+    "BTCUSDT": {
+      "path": "/home/rahul/Documents/Claude/Experiment-03_Simple_AlgoTrade/src/optimization/new_optimizer_lab/bakeoff_15m/data/BTCUSDT_15m_warmup1000_dev.csv",
+      "rows": 71080,
+      "warmup_rows": 1000,
+      "dev_rows": 70080,
+      "start": "2024-07-05 14:00:00+00:00",
+      "end": "2026-07-15 23:45:00+00:00",
+      "sha256": "b399c094604eb6649400f39d9552b9cf654f6adf21e5838e73498fdf0670323e",
+      "source": "fetched from fapi.binance.com, bounded below 2026-07-16"
+    }
+  }
+}

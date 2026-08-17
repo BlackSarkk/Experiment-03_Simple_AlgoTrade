@@ -1,0 +1,72 @@
+{
+  "validated": true,
+  "authorized_interval": [
+    "2026-07-15 00:15:00+00:00",
+    "2026-07-15 23:45:00+00:00"
+  ],
+  "lock_boundary_exclusive": "2026-07-16 00:00:00+00:00",
+  "fetched_rows": 95,
+  "fetched_first": "2026-07-15 00:15:00+00:00",
+  "fetched_last": "2026-07-15 23:45:00+00:00",
+  "checks": [
+    {
+      "check": "row count == 95",
+      "pass": true,
+      "detail": "95"
+    },
+    {
+      "check": "all timestamps >= authorized start",
+      "pass": true,
+      "detail": "min 2026-07-15 00:15:00+00:00"
+    },
+    {
+      "check": "all timestamps <= authorized end",
+      "pass": true,
+      "detail": "max 2026-07-15 23:45:00+00:00"
+    },
+    {
+      "check": "zero rows at/after lock boundary",
+      "pass": true,
+      "detail": "0"
+    },
+    {
+      "check": "no duplicate timestamps",
+      "pass": true,
+      "detail": "dups 0"
+    },
+    {
+      "check": "uniform 15m spacing, no gaps",
+      "pass": true,
+      "detail": "distinct deltas [900]"
+    },
+    {
+      "check": "contiguous with existing cache",
+      "pass": true,
+      "detail": "cache_last 1784073600 -> new_first 1784074500"
+    },
+    {
+      "check": "no overlap with existing cache",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "prices sane",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "before": {
+    "rows": 160033,
+    "start": "2021-12-21 00:00:00+00:00",
+    "end": "2026-07-15 00:00:00+00:00",
+    "sha256": "d4555d1cadedc4178665473f18351c1164d8bfe23e1f2a0014d7c953838be0ff"
+  },
+  "after": {
+    "rows": 160128,
+    "start": "2021-12-21 00:00:00+00:00",
+    "end": "2026-07-15 23:45:00+00:00",
+    "sha256": "4c7d6e10c8d5b61cab8a519d55d5d8437ca9d5052fa4f91aae88975db4b9f810"
+  },
+  "quarantine_dataset": "/home/rahul/Documents/Claude/Experiment-03_Simple_AlgoTrade/src/optimization/recovered_phase3a/quarantine/data/candles_futures_binance_futures_ETHUSDT_15m.csv",
+  "project_cache_modified": false
+}

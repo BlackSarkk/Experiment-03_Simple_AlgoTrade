@@ -1,0 +1,43 @@
+{
+  "_name": "Balanced return-vs-DD \u2014 Trial #53 strategy + Trial #158 risk",
+  "_source": "strategy: results/optimization/phase3a_15m_long/stage2_15m_long_trials.csv trial=53 | risk: results/optimization/phase3a_15m_long/risk_search_t53.csv trial=158 (verified against risk_top10_full_metrics.csv)",
+  "_trial_id": "stage2_15m_long#53 + risk_search_t53#158",
+  "_purpose": "Best return/DD balance found before the profit-first experiment. FAILED Stage-3 neighbourhood robustness (8.6% acceptance, 51.0% within-30%).",
+  "_reference_return": "train +100.28% / val +45.97%",
+  "_reference_pf": "train 1.218 / val 1.425",
+  "_reference_max_dd": "train 19.83% / val 20.27%",
+  "_reference_trades": "train 323 / val 101",
+  "_evaluation_period": "ETHUSDT 15m 2022-01-01..2026-08-15, Phase-3 60/20/20 split, TRAIN+VAL",
+  "_note": "Metadata fields are informational only and are ignored at runtime.",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 105,
+    "rsi_period": 18,
+    "rsi_overbought": 80.0,
+    "rsi_oversold": 33.0,
+    "atr_period": 11,
+    "consolidation_candles": 14,
+    "consolidation_atr_mult": 3.3,
+    "swing_lookback": 8,
+    "volume_sma_period": 32,
+    "volume_mult": 1.5,
+    "risk_reward_ratio": 2.7,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "leverage": 5.0,
+    "risk_per_trade_pct": 1.7,
+    "max_position_allocation_pct": 28.0,
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  }
+}

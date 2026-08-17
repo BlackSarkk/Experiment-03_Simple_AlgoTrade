@@ -1,0 +1,257 @@
+{
+  "preflight": [
+    {
+      "check": "zero rows at/after 2026-08-17",
+      "pass_ok": true,
+      "detail": "0"
+    },
+    {
+      "check": "warmup rows == 1000",
+      "pass_ok": true,
+      "detail": "1000"
+    },
+    {
+      "check": "DEV rows == 65760",
+      "pass_ok": true,
+      "detail": "65760"
+    },
+    {
+      "check": "TEST rows == 7392",
+      "pass_ok": true,
+      "detail": "7392"
+    },
+    {
+      "check": "DEV starts 2024-07-16 00:00",
+      "pass_ok": true,
+      "detail": "2024-07-16 00:00:00+00:00"
+    },
+    {
+      "check": "DEV ends 2026-05-31 23:45",
+      "pass_ok": true,
+      "detail": "2026-05-31 23:45:00+00:00"
+    },
+    {
+      "check": "TEST 2026-06-01..2026-08-16",
+      "pass_ok": true,
+      "detail": ""
+    },
+    {
+      "check": "optimization frame excludes TEST",
+      "pass_ok": true,
+      "detail": "66760"
+    },
+    {
+      "check": "budgets: 1a=400, 1b=800, 1c=200, 2a=300, 2b=150",
+      "pass_ok": true,
+      "detail": "1a=400, 1b=800, 1c=200, 2a=300, 2b=150"
+    },
+    {
+      "check": "seed = 42, n_jobs = 1",
+      "pass_ok": true,
+      "detail": "seed=42, n_jobs=1"
+    },
+    {
+      "check": "evaluator parity (recovered vs BacktestEngine)",
+      "pass_ok": true,
+      "detail": "rec n=145 ret=216.327275 | v2 n=145 ret=216.327275"
+    }
+  ],
+  "stages": {
+    "1a_broad": {
+      "trial": 242,
+      "score": 0.38100348716054033,
+      "params": {
+        "ema_period": 95,
+        "rsi_period": 21,
+        "rsi_overbought": 59.0,
+        "rsi_oversold": 39.0,
+        "atr_period": 14,
+        "consolidation_candles": 16,
+        "consolidation_atr_mult": 3.3000000000000003,
+        "swing_lookback": 8,
+        "volume_sma_period": 28,
+        "volume_mult": 1.4,
+        "risk_reward_ratio": 2.4000000000000004
+      }
+    },
+    "1b_narrow": {
+      "trial": 563,
+      "score": 0.4108783095629651,
+      "params": {
+        "ema_period": 92,
+        "rsi_period": 21,
+        "rsi_overbought": 59.0,
+        "rsi_oversold": 40.0,
+        "atr_period": 20,
+        "consolidation_candles": 16,
+        "consolidation_atr_mult": 3.4000000000000004,
+        "swing_lookback": 10,
+        "volume_sma_period": 28,
+        "volume_mult": 1.5,
+        "risk_reward_ratio": 2.7
+      }
+    },
+    "1c_risk": {
+      "trial": 63,
+      "score": 0.6880275843917343,
+      "params": {
+        "leverage": 4.5,
+        "risk_per_trade_pct": 0.028,
+        "max_position_allocation_pct": 0.55
+      }
+    },
+    "seed": {
+      "ema_period": 92,
+      "rsi_period": 21,
+      "rsi_overbought": 59.0,
+      "rsi_oversold": 40.0,
+      "atr_period": 20,
+      "consolidation_candles": 16,
+      "consolidation_atr_mult": 3.4000000000000004,
+      "swing_lookback": 10,
+      "volume_sma_period": 28,
+      "volume_mult": 1.5,
+      "risk_reward_ratio": 2.7,
+      "leverage": 4.5,
+      "risk_per_trade_pct": 0.028,
+      "max_position_allocation_pct": 0.55
+    },
+    "2a_final": {
+      "trial": 0,
+      "score": 0.6880275843917343,
+      "params": {
+        "ema_period": 92,
+        "rsi_period": 21,
+        "rsi_overbought": 59.0,
+        "rsi_oversold": 40.0,
+        "atr_period": 20,
+        "consolidation_candles": 16,
+        "consolidation_atr_mult": 3.4000000000000004,
+        "swing_lookback": 10,
+        "volume_sma_period": 28,
+        "volume_mult": 1.5,
+        "risk_reward_ratio": 2.7,
+        "leverage": 4.5,
+        "risk_per_trade_pct": 0.028,
+        "max_position_allocation_pct": 0.55
+      }
+    },
+    "2b_boll": {
+      "trial": 133,
+      "score": 0.2600114157589856,
+      "cfg": {
+        "enabled": true,
+        "length": 17,
+        "std": 2.1,
+        "min_bandwidth_pct": 0.0,
+        "expansion_lookback": 18,
+        "expansion_min_ratio": 0.55,
+        "min_mid_distance": 0.08
+      }
+    }
+  },
+  "dev_metrics": {
+    "off": {
+      "train": {
+        "return_pct": 100.14840066764947,
+        "pf": 1.3549677615556683,
+        "sharpe": 1.5850317688696158,
+        "max_dd": 36.28516431190924,
+        "trades": 125,
+        "wins": 45,
+        "losses": 80,
+        "win_rate": 36.0,
+        "gross_profit": 38227.99,
+        "gross_loss": 28213.21,
+        "net_pnl": 10014.779999999999,
+        "fees": 3865.68,
+        "blocked": 0,
+        "head_dropped": 1
+      },
+      "valid": {
+        "return_pct": 100.22070091554997,
+        "pf": 1.9080750339098687,
+        "sharpe": 3.360951890967806,
+        "max_dd": 16.992601024244284,
+        "trades": 64,
+        "wins": 29,
+        "losses": 35,
+        "win_rate": 45.3125,
+        "gross_profit": 21058.679999999997,
+        "gross_loss": 11036.61,
+        "net_pnl": 10022.069999999996,
+        "fees": 2086.78,
+        "blocked": 0,
+        "head_dropped": 0
+      }
+    },
+    "on": {
+      "train": {
+        "return_pct": 142.65075305824973,
+        "pf": 1.5436679666612927,
+        "sharpe": 2.089207973906482,
+        "max_dd": 27.258851863915147,
+        "trades": 103,
+        "wins": 41,
+        "losses": 62,
+        "win_rate": 39.80582524271845,
+        "gross_profit": 40503.64,
+        "gross_loss": 26238.570000000003,
+        "net_pnl": 14265.069999999996,
+        "fees": 3694.64,
+        "blocked": 79,
+        "head_dropped": 1
+      },
+      "valid": {
+        "return_pct": 111.87790528509996,
+        "pf": 2.1968701892371563,
+        "sharpe": 3.828147770120817,
+        "max_dd": 14.434367093685635,
+        "trades": 55,
+        "wins": 27,
+        "losses": 28,
+        "win_rate": 49.09090909090909,
+        "gross_profit": 20535.309999999998,
+        "gross_loss": 9347.53,
+        "net_pnl": 11187.779999999997,
+        "fees": 1853.76,
+        "blocked": 31,
+        "head_dropped": 0
+      }
+    }
+  },
+  "test_metrics": {
+    "off": {
+      "return_pct": 26.18838352735005,
+      "pf": 1.9234990020382396,
+      "sharpe": 2.764182739267775,
+      "max_dd": 11.48745439523064,
+      "trades": 22,
+      "wins": 9,
+      "losses": 13,
+      "win_rate": 40.90909090909091,
+      "gross_profit": 5454.62,
+      "gross_loss": 2835.78,
+      "net_pnl": 2618.8399999999997,
+      "fees": 595.69,
+      "blocked": 0,
+      "head_dropped": 0
+    },
+    "on": {
+      "return_pct": 25.588596145650133,
+      "pf": 2.2095540618470935,
+      "sharpe": 2.9004744983451363,
+      "max_dd": 10.177391839865841,
+      "trades": 17,
+      "wins": 7,
+      "losses": 10,
+      "win_rate": 41.1764705882353,
+      "gross_profit": 4674.4,
+      "gross_loss": 2115.54,
+      "net_pnl": 2558.8599999999997,
+      "fees": 474.82,
+      "blocked": 11,
+      "head_dropped": 0
+    }
+  }
+}

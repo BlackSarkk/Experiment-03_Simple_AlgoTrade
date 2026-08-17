@@ -1,0 +1,111 @@
+{
+  "_name": "auto-optimiser winner \u2014 TRAIN rank 62",
+  "_description": "Produced automatically by src/auto_optimise stages 1-6. Strategy, risk and filter were selected on TRAIN and VALIDATION; UNSEEN was opened once, after the champion was frozen, and only to confirm it.",
+  "_generated_by": "auto_optimise",
+  "_risk_policy": "preset",
+  "_symbol": "ETHUSDT",
+  "_timeframe": "15m",
+  "_direction": "LONG_ONLY",
+  "_train_start": "2023-08-18 00:15:00+00:00",
+  "_train_end": "2025-06-05 00:00:00+00:00",
+  "_validation_start": "2025-06-05 00:15:00+00:00",
+  "_validation_end": "2026-01-10 00:00:00+00:00",
+  "_unseen_start": "2026-01-10 00:15:00+00:00",
+  "_unseen_end": "2026-08-17 00:15:00+00:00",
+  "_provenance": {
+    "name": "auto-optimiser winner \u2014 TRAIN rank 62",
+    "run_id": "20260817-003012_ETHUSDT_15m",
+    "frozen_rank": 1,
+    "fallback_activated": false,
+    "pre_unseen_checksum": "1e1a0e87cb3440a17c3bf36f159b4c6cd576ae7f89ad14e14d414ab6280705b5",
+    "unseen_status": "DEGRADED",
+    "unseen_reasons": [
+      "profit_factor(1.01<1.05)"
+    ],
+    "decision_rules": {
+      "gate_version": "final_gate_v1",
+      "pareto_version": "pareto_v1",
+      "rank_version": "final_rank_v1",
+      "confirmation_version": "unseen_confirmation_v1",
+      "gate_thresholds": {
+        "min_valid_profit_factor": 1.1,
+        "min_valid_return_pct": 0.0,
+        "max_valid_drawdown_pct": 30.0,
+        "min_robustness_score": 0.0,
+        "min_risk_score": 0.0
+      },
+      "pareto_dimensions": [
+        "profitability",
+        "generalization",
+        "robustness",
+        "risk_quality",
+        "support"
+      ],
+      "mcdm_method": "TOPSIS",
+      "weights": {
+        "profitability": 0.25,
+        "generalization": 0.2,
+        "robustness": 0.25,
+        "risk_quality": 0.15,
+        "support": 0.15
+      },
+      "confirmation_thresholds": {
+        "confirm_min_pf": 1.05,
+        "confirm_min_return_pct": 0.0,
+        "confirm_max_dd_pct": 40.0,
+        "confirm_max_dd_ratio": 2.0,
+        "confirm_min_trade_ratio": 0.4,
+        "fail_pf": 0.9,
+        "fail_return_pct": -10.0
+      },
+      "fallback_policy": {
+        "CONFIRMED": "accept",
+        "DEGRADED": "accept_with_warning",
+        "FAILED": "try_next_fallback"
+      },
+      "uses_unseen_for_selection": false
+    }
+  },
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 50,
+    "rsi_period": 33,
+    "atr_period": 12,
+    "consolidation_candles": 7,
+    "swing_lookback": 17,
+    "volume_sma_period": 20,
+    "rsi_overbought": 56.0,
+    "rsi_oversold": 41.0,
+    "consolidation_atr_mult": 2.1,
+    "volume_mult": 1.6,
+    "risk_reward_ratio": 3.7,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "leverage": 1.5,
+    "risk_per_trade_pct": 2.6,
+    "max_position_allocation_pct": 100.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": true,
+      "length": 32,
+      "expansion_lookback": 18,
+      "std": 2.3,
+      "min_bandwidth_pct": 1.2,
+      "expansion_min_ratio": 0.25,
+      "min_mid_distance": 0.1
+    }
+  }
+}

@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass
 from typing import Union
 
+from . import budgets as budgets_mod
 from . import history as history_mod
 from . import trials as trials_mod
 
@@ -19,6 +20,9 @@ REQUIRED_KEYS = (
     "platform", "symbol", "timeframe", "history", "initial_balance",
     "direction", "trials", "optimization_mode", "stages",
 )
+
+# Optional blocks. Absent means the documented default, never a silent guess.
+OPTIONAL_KEYS = ("execution", "partition")
 
 SUPPORTED_PLATFORMS = ("BINANCE_FUTURES",)
 SUPPORTED_MODES = ("balanced", "conservative", "aggressive")
@@ -50,6 +54,29 @@ class Stages:
 
 
 @dataclass(frozen=True)
+class Execution:
+    # "auto" -> resolve PRICE_FILTER.tickSize from the exchange; or a positive
+    # number, validated against that same metadata. Never derived from timeframe.
+    tick_size: Union[str, float] = "auto"
+
+
+@dataclass(frozen=True)
+class Partition:
+    """Chronological split policy. Not a search input.
+
+    UNSEEN is carved off the END of the requested window first and locked. The
+    remaining DEV span is handed to canonical V3, which applies its own fixed
+    70/30 TRAIN/VALID split internally — V3 is not modifiable, so the effective
+    whole-window split at the default 20% UNSEEN is 56 / 24 / 20.
+
+    `unseen_start` pins the UNSEEN boundary to an exact date instead, which is
+    what reproducing a historical campaign requires.
+    """
+    unseen_pct: float = 20.0
+    unseen_start: object = None          # datetime.date | None
+
+
+@dataclass(frozen=True)
 class OptimizerPreset:
     path: str
     platform: str
@@ -61,9 +88,22 @@ class OptimizerPreset:
     trials: Union[str, int]
     optimization_mode: str
     stages: Stages
+    execution: Execution = None
+    partition: Partition = None
+    # Verbatim file contents, captured at load time. The manifest records what the
+    # human actually asked for, and re-reading the path later is not safe: the file
+    # may have been edited or removed while the campaign was running.
+    snapshot: dict = None
 
     def resolved_trials(self) -> "tuple[int, bool]":
-        return trials_mod.resolve(self.trials, self.timeframe)
+        """Back-compat shim: (total, was_auto)."""
+        total, _alloc, was_auto, _note = self.resolved_budgets()
+        return total, was_auto
+
+    def resolved_budgets(self):
+        """(total, {stage: trials}, was_auto, explanation) — the five V3 budgets."""
+        return budgets_mod.resolve(self.trials, self.timeframe,
+                                   self.history.span_days(self.timeframe))
 
 
 def resolve_path(arg: str) -> str:
@@ -120,6 +160,13 @@ def load(arg: str) -> OptimizerPreset:
             f"       file: {path}"
         )
 
+    schema_version = raw.get("_schema_version")
+    if schema_version != 3:
+        raise PresetError(
+            f"unsupported preset schema version: {schema_version!r} (expected 3)\n"
+            f"       file: {path}"
+        )
+
     platform = raw["platform"]
     if platform not in SUPPORTED_PLATFORMS:
         raise PresetError(
@@ -162,6 +209,8 @@ def load(arg: str) -> OptimizerPreset:
             "there is nothing to optimize"
         )
 
+    # `trials` is the TOTAL across all five V3 stages. Per-stage budgets are
+    # derived in budgets.py and are deliberately not preset fields.
     trials = raw["trials"]
     if isinstance(trials, str):
         if trials != "auto":
@@ -170,11 +219,11 @@ def load(arg: str) -> OptimizerPreset:
             )
     elif isinstance(trials, bool) or not isinstance(trials, int):
         raise PresetError(f"trials must be \"auto\" or a whole number, got {trials!r}")
-    elif not (trials_mod.MIN_TRIALS <= trials <= trials_mod.MAX_TRIALS):
-        raise PresetError(
-            f"trials must be between {trials_mod.MIN_TRIALS} and "
-            f"{trials_mod.MAX_TRIALS}, got {trials}"
-        )
+    else:
+        try:
+            budgets_mod.allocate(trials)
+        except budgets_mod.BudgetError as exc:
+            raise PresetError(str(exc))
 
     mode = raw["optimization_mode"]
     if mode not in SUPPORTED_MODES:
@@ -200,6 +249,69 @@ def load(arg: str) -> OptimizerPreset:
     if not any((stages.strategy_optimization, stages.risk_management, stages.bollinger)):
         raise PresetError("every stage is disabled; there is nothing to optimize")
 
+    if not stages.strategy_optimization:
+        raise PresetError(
+            "stages.strategy_optimization is false, but a new optimizer run cannot "
+            "start without it: stages 1a/1b discover the strategy seed that the "
+            "risk and Bollinger stages are searched around.\n"
+            "       Enable strategy_optimization, or run a backtest instead of an "
+            "optimization."
+        )
+
+    # ---- optional execution block -----------------------------------------
+    exec_block = raw.get("execution", {})
+    if not isinstance(exec_block, dict):
+        raise PresetError("execution must be an object with tick_size")
+    unknown = set(exec_block) - {"tick_size"}
+    if unknown:
+        raise PresetError(
+            f"unknown key(s) in execution: {', '.join(sorted(unknown))} "
+            "(allowed: tick_size). Commission, slippage and quantity step are "
+            "project constants or resolved from the exchange."
+        )
+    tick = exec_block.get("tick_size", "auto")
+    if isinstance(tick, str):
+        if tick != "auto":
+            raise PresetError(
+                f"execution.tick_size must be \"auto\" or a positive number, got {tick!r}"
+            )
+    elif isinstance(tick, bool) or not isinstance(tick, (int, float)):
+        raise PresetError(
+            f"execution.tick_size must be \"auto\" or a positive number, got {tick!r}"
+        )
+    elif tick <= 0:
+        raise PresetError(f"execution.tick_size must be positive, got {tick!r}")
+    else:
+        tick = float(tick)
+    execution = Execution(tick_size=tick)
+
+    # ---- optional partition block -----------------------------------------
+    part_block = raw.get("partition", {})
+    if not isinstance(part_block, dict):
+        raise PresetError("partition must be an object with unseen_pct/unseen_start")
+    unknown = set(part_block) - {"unseen_pct", "unseen_start"}
+    if unknown:
+        raise PresetError(
+            f"unknown key(s) in partition: {', '.join(sorted(unknown))} "
+            "(allowed: unseen_pct, unseen_start)"
+        )
+    unseen_pct = part_block.get("unseen_pct", 20.0)
+    if isinstance(unseen_pct, bool) or not isinstance(unseen_pct, (int, float)):
+        raise PresetError(f"partition.unseen_pct must be a number, got {unseen_pct!r}")
+    if not (5.0 <= float(unseen_pct) <= 40.0):
+        raise PresetError(
+            f"partition.unseen_pct must be between 5 and 40, got {unseen_pct}"
+        )
+    unseen_start = part_block.get("unseen_start")
+    if unseen_start is not None:
+        if "unseen_pct" in part_block:
+            raise PresetError(
+                "partition.unseen_pct and partition.unseen_start are mutually "
+                "exclusive; set the percentage OR the exact boundary date."
+            )
+        unseen_start = history_mod._parse_date(unseen_start, "partition.unseen_start")
+    partition = Partition(unseen_pct=float(unseen_pct), unseen_start=unseen_start)
+
     return OptimizerPreset(
         path=path,
         platform=platform,
@@ -211,4 +323,7 @@ def load(arg: str) -> OptimizerPreset:
         trials=trials,
         optimization_mode=mode,
         stages=stages,
+        execution=execution,
+        partition=partition,
+        snapshot=raw,
     )

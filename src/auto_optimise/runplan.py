@@ -2,8 +2,8 @@
 
 The six-stage view is the campaign skeleton the full optimizer will execute.
 Disabled stages are shown as SKIPPED and are excluded from ETA estimation.
-Partition ratios are fixed policy (chronological 60/20/20 by calendar date, with
-a separate warmup block before TRAIN); they are not preset inputs.
+Partition ratios are fixed policy: UNSEEN is reserved first (default 20%), and V3
+splits the remaining DEV 70/30, giving an effective 56/24/20. Not preset inputs.
 """
 
 from dataclasses import dataclass
@@ -11,7 +11,10 @@ from typing import List
 
 from . import ui
 
-TRAIN_PCT, VALID_PCT, UNSEEN_PCT = 60, 20, 20
+from . import dataprep as _dp
+TRAIN_PCT, VALID_PCT, UNSEEN_PCT = (_dp.effective_ratios()["train_pct"],
+                                   _dp.effective_ratios()["valid_pct"],
+                                   _dp.effective_ratios()["unseen_pct"])
 
 # (key, label). `key` is None for stages that always run.
 STAGE_DEFS = (
@@ -79,16 +82,58 @@ def render_stage_report(preset, prepared, elapsed: float) -> str:
     add(f"      Checksum:  {prepared.checksum}")
     add(f"      Elapsed:   {elapsed:.1f}s")
 
-    for stage in stages[1:]:
-        add(stage.render("NOT IMPLEMENTED"))
-
-    add("")
-    add(ui.warn("No output config written — no optimization winner exists yet."))
     return "\n".join(lines)
 
 
 def _fmt(ts) -> str:
     return ts.strftime("%Y-%m-%d %H:%M")
+
+
+def render_phase_a_report(preset, result) -> str:
+    stages = build_stages(preset.stages)
+    lines = []
+    add = lines.append
+
+    add("")
+    add(stages[1].render("PASS"))
+    rate = result.completed / max(1e-9, result.seconds)
+    add(f"      Trials:    {result.completed} completed, {result.rejected} rejected "
+        f"(min {result.min_trades} trades on TRAIN)")
+    add(f"      Runtime:   {result.seconds:.1f}s  ({rate:.2f} trials/sec)")
+
+    if result.best:
+        b = result.best
+        add("      Best TRAIN candidate:")
+        add(f"        score {b['score']:.2f} | return {b.get('net_return_pct', 0):.2f}% "
+            f"| PF {b.get('profit_factor', 0):.3f} | Sharpe {b.get('sharpe', 0):.2f} "
+            f"| DD {b.get('max_dd_pct', 0):.2f}% | {b.get('trades', 0)} trades")
+        add(f"        EMA {b['ema_period']} · RSI {b['rsi_period']} "
+            f"({b['rsi_oversold']:.0f}/{b['rsi_overbought']:.0f}) · ATR {b['atr_period']} "
+            f"· cons {b['consolidation_candles']}@{b['consolidation_atr_mult']:.1f} "
+            f"· swing {b['swing_lookback']} "
+            f"· vol {b['volume_sma_period']}@{b['volume_mult']:.1f}x "
+            f"· RR {b['risk_reward_ratio']:.1f}")
+    else:
+        add(ui.warn("      No admissible candidate survived the Phase-A filters."))
+
+    if result.shortlist:
+        add(f"      Shortlist: top {len(result.shortlist)} screened on VALIDATION")
+        top = result.shortlist[0]
+        if top.get("valid_net_return_pct") is not None:
+            add(f"        #1 on VALID: return {top['valid_net_return_pct']:.2f}% "
+                f"| PF {top['valid_profit_factor']:.3f} "
+                f"| Sharpe {top['valid_sharpe']:.2f} "
+                f"| DD {top['valid_max_dd_pct']:.2f}% "
+                f"| {top['valid_trades']} trades")
+    add(f"      Artifacts: {result.run_path}/")
+    add("      UNSEEN:    " + ui.warn("[LOCKED]") + ui.dim("  never accessed in Phase A"))
+
+    for stage in stages[2:]:
+        add(stage.render("NOT IMPLEMENTED"))
+
+    add("")
+    add(ui.warn("No output config written — no optimization winner exists yet."))
+    return "\n".join(lines)
 
 
 def render(preset, output) -> str:

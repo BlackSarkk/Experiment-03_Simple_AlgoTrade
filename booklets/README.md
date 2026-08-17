@@ -71,11 +71,41 @@ One generic interface — no aliases, no numbered presets:
 ```
 
 Reads `configs/optimize/odefault.json`, writes `configs/config/mywinner.json`.
-Stage [1/6] (data preparation, 60/20/20 partitions, locked UNSEEN) is implemented;
-stages [2/6]-[6/6] are not, so no output config is written yet.
+
+The optimizer drives the canonical V3 package (`src/optimization/v3/`) and is
+**fully implemented end to end** — all five V3 stages run and a runnable config is
+written:
+
+| stage | trials at the 1,850 total | what it searches |
+|---|---|---|
+| 1a broad strategy | 400 | 11 strategy dims at neutral risk |
+| 1b narrowed strategy | 800 | same dims, ranges derived from 1a survivors |
+| 1c risk-only | 200 | leverage / risk / allocation on the frozen strategy |
+| 2a final joint | 300 | all 14 dims, discovered seed enqueued as trial 0 |
+| 2b Bollinger | 150 | 6 filter dims, strategy + risk frozen |
+
+`trials` is a single TOTAL. `"auto"` resolves a documented total from timeframe and
+history length; any explicit integer is allocated deterministically across the five
+stages. The run plan prints the five budgets before anything runs.
+
+`execution.tick_size` is `"auto"` by default and is resolved once from Binance
+Futures `PRICE_FILTER.tickSize` for the symbol; the quantity step comes from
+`LOT_SIZE.stepSize`. Both resolved values are recorded in the manifest and the
+emitted config. Tick size is never derived from the timeframe and there is no
+per-symbol map.
+
+`history` (preset `_schema_version: 3`) requires an explicit `mode`: `auto`, `days`, `date_range`, or `candles`.
+Only fields required by the chosen mode may be non-null. `auto` targets ~43,000 candles from timeframe
+(e.g., 1m -> 30d, 15m -> 450d). Custom short history runs emit an experimental note without stopping execution.
+
+UNSEEN is carved off the end of the window, locked, and physically removed from the
+frame the optimizer receives, so no search, narrowing, seed, risk or Bollinger stage
+can address it. It is opened once, after the winner is frozen, and its metrics are
+recorded as confirmation only — they never change the selection.
+
 The output name is mandatory, is never auto-generated, and an existing config is
-never overwritten. `--optimize` cannot be combined with any execution or
-maintenance action. See `WALKTHROUGH.md` § 15.
+never overwritten — the check runs before any data is loaded. `--optimize` cannot be
+combined with any execution or maintenance action. See `WALKTHROUGH.md` § 15.
 
 ## Backups and reference code
 

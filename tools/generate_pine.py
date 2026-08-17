@@ -1,33 +1,31 @@
 """Generate one Pine v5 strategy per OP-BB config.
 
-Ports the user's base pine.pine to CURRENT validated Python behaviour:
+Ports the user's strategy config to Pine Script v5:
   * Bollinger filter replaced with the Stage-1 Python filter (min bandwidth / expansion
     ratio vs bandwidth[lookback] / middle-band distance)
-  * margin-based allocation cap (max_margin = equity*alloc; max_notional = margin*leverage)
-  * risk budget from PLAIN equity, not leveraged equity
+  * Margin-based allocation cap (max_margin = equity*alloc; max_notional = margin*leverage)
+  * Risk budget from PLAIN equity, not leveraged equity
   * SL/TP recomputed from the REALIZED entry fill, matching BaselineRiskManager
-  * quantity floored to quantity_step; SL/TP rounded to tick_size
-  * invalid/inverted SL rejects the trade (no 1% substitute)
-  * ADX retained as an inert toggle (default off) — not present in the Python strategy
+  * Quantity floored to quantity_step; SL/TP rounded to tick_size
+  * Invalid/inverted SL rejects the trade (no 1% substitute)
+  * ADX REMOVED COMPLETELY
+  * Direction (long/short enabled) and Bollinger settings loaded directly from input JSON config
 """
 
 import json
 import os
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "pine")
+CONFIG_DIR = os.path.join(ROOT, "configs", "config")
 
-# Config1 and Config2 are both fully expressible by TEMPLATE: they share every strategy,
-# risk and execution value and differ only in filters.bollinger.enabled, which the template
-# injects as {bb_enabled}. Config1 stays PROTECTED because it is the frozen baseline that
-# every recorded result reconciles against; Config2 is safe to regenerate.
-MAP = [
-    ("config1-ETHUSDTP15m-long.json", "config1-ETHUSDTP15m-long.pine",
-     "ETHUSDT.P 15m — Candidate 158 OP-BB", "ETHUSDT.P 15m C158"),
-    ("config2-ETHUSDTP15m-long.json", "config2-ETHUSDTP15m-long.pine",
-     "ETHUSDT.P 15m — Candidate 158 OP-BB (Bollinger ON)", "ETHUSDT.P 15m C158-BB"),
-]
 PROTECTED = {"config1-ETHUSDTP15m-long.pine"}   # frozen baseline — never regenerate
+
+
+class ConfigValidationError(ValueError):
+    """Raised when input config is missing required fields for Pine export."""
+
 
 TEMPLATE = r'''//@version=5
 strategy("{title}", shorttitle="{short}", overlay=true, initial_capital={capital}, default_qty_type=strategy.cash, commission_type=strategy.commission.percent, commission_value={commission}, slippage={slippage}, process_orders_on_close=false, pyramiding=0, margin_long=0, margin_short=0)
@@ -44,7 +42,7 @@ strategy("{title}", shorttitle="{short}", overlay=true, initial_capital={capital
 // Consolidation = {cons} candles / {cmult} ATR
 // Swing         = {swing}      Volume SMA = {vsma}   Volume Mult = {vmult}
 // RR            = {rr}
-// Long ON / Short OFF
+// Long {long_str} / Short {short_str}
 // Leverage {lev}x | Risk {risk}% | Allocation {alloc}% | Qty step {qstep} | Tick {tick}
 // Bollinger     = len {bb_len} / std {bb_std} / minBW {bb_minbw}% / exp {bb_explb}-{bb_expratio} / midDist {bb_middist}
 //
@@ -80,8 +78,8 @@ vol_mult    = input.float({vmult}, "Volume Multiplier vs SMA", minval=0.1, step=
 // 3. RISK MANAGEMENT & POSITION SIZING  (mirrors BaselineRiskManager)
 // =============================================================================
 grp_risk = "3. Risk Management & Position Sizing"
-enable_long  = input.bool(true,  "Enable Long Trades",  group=grp_risk)
-enable_short = input.bool(false, "Enable Short Trades", group=grp_risk)
+enable_long  = input.bool({enable_long},  "Enable Long Trades",  group=grp_risk)
+enable_short = input.bool({enable_short}, "Enable Short Trades", group=grp_risk)
 leverage  = input.float({lev}, "Leverage (x)", minval=1.0, maxval=100.0, step=0.5, group=grp_risk)
 risk_pct  = input.float({risk}, "Account Risk % Per Trade (price risk, gross of fees)", minval=0.1, maxval=10.0, step=0.1, group=grp_risk)
 max_alloc = input.float({alloc}, "Max Equity Committed As MARGIN %", minval=5.0, maxval=100.0, step=5.0, group=grp_risk)
@@ -114,15 +112,6 @@ bb_exp_ratio= input.float({bb_expratio}, "Expansion Min Ratio (0 = off)", minval
 bb_mid_dist = input.float({bb_middist}, "Min Middle-Band Distance (0 = off)", minval=0.0, step=0.01, group=grp_bb)
 
 // =============================================================================
-// 6. ADX FILTER  (not part of the Python strategy — inert unless enabled)
-// =============================================================================
-grp_adx = "6. ADX Filter (not in Python strategy)"
-adx_enabled   = input.bool(false, "Enable ADX Filter", group=grp_adx)
-adx_len       = input.int(12, "ADX Length", minval=1, group=grp_adx)
-adx_threshold = input.float(15.0, "ADX Threshold", minval=1.0, step=1.0, group=grp_adx)
-adx_rising    = input.bool(false, "Require Rising ADX", group=grp_adx)
-
-// =============================================================================
 // INDICATOR CALCULATIONS
 // =============================================================================
 ema_v   = ta.ema(close, ema_len)
@@ -148,10 +137,6 @@ bb_block_exp = bb_exp_ratio > 0.0 and not na(bb_ratio) and bb_ratio < bb_exp_rat
 bb_block_mid = bb_mid_dist  > 0.0 and not na(bb_middist_v) and bb_middist_v < bb_mid_dist
 bb_ok = not bb_enabled or not (bb_block_bw or bb_block_exp or bb_block_mid)
 
-// --- ADX (inert by default) ---
-[_dip, _dim, adx_val] = ta.dmi(adx_len, adx_len)
-adx_ok = not adx_enabled or (adx_val >= adx_threshold and (not adx_rising or adx_val > adx_val[1]))
-
 // =============================================================================
 // CONSOLIDATION / SWING / RSI CONTEXT / VOLUME
 // =============================================================================
@@ -176,8 +161,8 @@ rsi_long_valid  = (rsi_v < rsi_ob) and (rsi_v >= 40.0 or rsi_was_oversold)
 rsi_short_valid = (rsi_v > rsi_os) and (rsi_v <= 60.0 or rsi_was_overbought)
 cons_valid = prior_consolidation or is_consolidating
 
-long_signal  = enable_long  and ema_cross_up   and rsi_long_valid  and cons_valid and vol_confirmed and bb_ok and adx_ok
-short_signal = enable_short and ema_cross_down and rsi_short_valid and cons_valid and vol_confirmed and bb_ok and adx_ok
+long_signal  = enable_long  and ema_cross_up   and rsi_long_valid  and cons_valid and vol_confirmed and bb_ok
+short_signal = enable_short and ema_cross_down and rsi_short_valid and cons_valid and vol_confirmed and bb_ok
 
 // =============================================================================
 // POSITION SIZING — mirrors BaselineRiskManager.calculate_position()
@@ -305,46 +290,197 @@ if show_hud and barstate.islast
 '''
 
 
-def main():
-    os.makedirs(OUT, exist_ok=True)
-    for cfgfile, pinefile, title, short in MAP:
-        if pinefile in PROTECTED:
-            print(f"  SKIP {pinefile} (protected: frozen baseline)")
-            continue
-        d = json.load(open(os.path.join(ROOT, "configs", "config", cfgfile)))
-        s, r, b, e = d["strategy"], d["risk"], d["filters"]["bollinger"], d["execution"]
-        m = d.get("_reference_metrics", {})
-        uo, un = m.get("unseen_filter_off", {}), m.get("unseen_filter_on", {})
-        src = TEMPLATE.format(
-            title=title, short=short, cfgfile=cfgfile,
-            source=d.get("_source", ""), arch=d.get("_optimizer_architecture", ""),
-            dev_start=d.get("_development_start"), dev_end=d.get("_development_end"),
-            uns_start=d.get("_unseen_start"), uns_end=d.get("_unseen_end"),
-            capital=int(r["initial_capital"]), commission=e["commission_pct"],
-            slippage=int(e["slippage_ticks"]), tick=e["tick_size"], qstep=r["quantity_step"],
-            ema=int(s["ema_period"]), rsi=int(s["rsi_period"]),
-            ob=round(float(s["rsi_overbought"]), 1), os=round(float(s["rsi_oversold"]), 1),
-            atr=int(s["atr_period"]), cons=int(s["consolidation_candles"]),
-            cmult=round(float(s["consolidation_atr_mult"]), 2),
-            swing=int(s["swing_lookback"]), vsma=int(s["volume_sma_period"]),
-            vmult=round(float(s["volume_mult"]), 2), rr=round(float(s["risk_reward_ratio"]), 2),
-            lev=round(float(r["leverage"]), 1), risk=round(float(r["risk_per_trade_pct"]), 2),
-            alloc=round(float(r["max_position_allocation_pct"]), 1),
-            bb_enabled=str(bool(b["enabled"])).lower(), bb_len=int(b["length"]),
-            bb_std=round(float(b["std"]), 2), bb_minbw=round(float(b["min_bandwidth_pct"]), 2),
-            bb_explb=int(b["expansion_lookback"]),
-            bb_expratio=round(float(b["expansion_min_ratio"]), 2),
-            bb_middist=round(float(b["min_mid_distance"]), 2),
-            ref_dev_ret=m.get("development_return_pct"), ref_dev_pf=m.get("development_pf"),
-            ref_dev_dd=m.get("development_max_dd_pct"), ref_dev_n=m.get("development_trades"),
-            ref_uoff_ret=uo.get("return_pct"), ref_uoff_pf=uo.get("pf"),
-            ref_uoff_dd=uo.get("max_dd_pct"), ref_uoff_n=uo.get("trades"),
-            ref_uon_ret=un.get("return_pct"), ref_uon_pf=un.get("pf"),
-            ref_uon_dd=un.get("max_dd_pct"), ref_uon_n=un.get("trades"),
+def _fmt(value, default="n/a"):
+    return default if value is None else value
+
+
+def validate_config(d: dict, cfgfile: str):
+    missing = []
+    if not isinstance(d, dict):
+        raise ConfigValidationError(f"config {cfgfile} is not a valid JSON object")
+
+    for sec in ["strategy", "risk", "execution"]:
+        if sec not in d or not isinstance(d[sec], dict):
+            missing.append(f"missing top-level block '{sec}'")
+
+    if missing:
+        raise ConfigValidationError(
+            f"config {cfgfile} is missing required fields for Pine export:\n  " + "\n  ".join(missing)
         )
-        open(os.path.join(OUT, pinefile), "w").write(src)
-        print(f"  pine/{pinefile}  <- configs/config/{cfgfile}")
+
+    s = d["strategy"]
+    req_strat = [
+        "ema_period", "rsi_period", "rsi_overbought", "rsi_oversold",
+        "atr_period", "consolidation_candles", "consolidation_atr_mult",
+        "swing_lookback", "volume_sma_period", "volume_mult",
+        "risk_reward_ratio", "long_enabled", "short_enabled"
+    ]
+    for k in req_strat:
+        if k not in s:
+            missing.append(f"strategy.{k}")
+
+    r = d["risk"]
+    req_risk = [
+        "initial_capital", "leverage", "risk_per_trade_pct",
+        "max_position_allocation_pct", "quantity_step"
+    ]
+    for k in req_risk:
+        if k not in r:
+            missing.append(f"risk.{k}")
+
+    e = d["execution"]
+    if "commission_pct" not in e and "taker_fee_pct" not in e and "maker_fee_pct" not in e:
+        missing.append("execution.commission_pct")
+    for k in ["slippage_ticks", "tick_size"]:
+        if k not in e:
+            missing.append(f"execution.{k}")
+
+    b = d.get("filters", {}).get("bollinger", {})
+    if b:
+        req_bb = ["enabled", "length", "std", "min_bandwidth_pct", "expansion_lookback", "expansion_min_ratio", "min_mid_distance"]
+        for k in req_bb:
+            if k not in b:
+                missing.append(f"filters.bollinger.{k}")
+
+    if missing:
+        raise ConfigValidationError(
+            f"config {cfgfile} is missing required field(s) for Pine export:\n  " + "\n  ".join(missing)
+        )
+
+
+def render(cfgfile: str, title: str, short: str) -> str:
+    cfg_path = os.path.join(CONFIG_DIR, cfgfile)
+    if not os.path.exists(cfg_path):
+        raise ConfigValidationError(f"config file does not exist: {cfg_path}")
+
+    try:
+        with open(cfg_path, "r") as fh:
+            d = json.load(fh)
+    except json.JSONDecodeError as exc:
+        raise ConfigValidationError(f"config {cfgfile} is not valid JSON: {exc}")
+
+    validate_config(d, cfgfile)
+
+    s = d["strategy"]
+    r = d["risk"]
+    e = d["execution"]
+    b = d.get("filters", {}).get("bollinger", {})
+
+    comm_val = e.get("commission_pct")
+    if comm_val is None:
+        comm_val = e.get("taker_fee_pct", 0.0005) * 100.0
+
+    long_on = bool(s.get("long_enabled", True))
+    short_on = bool(s.get("short_enabled", False))
+    bb_on = bool(b.get("enabled", False))
+
+    long_str = "ON" if long_on else "OFF"
+    short_str = "ON" if short_on else "OFF"
+
+    m = d.get("_reference_metrics", {})
+    uo, un = m.get("unseen_filter_off", {}), m.get("unseen_filter_on", {})
+
+    return TEMPLATE.format(
+        title=title, short=short, cfgfile=cfgfile,
+        source=d.get("_source", d.get("_description", "")),
+        arch=d.get("_optimizer_architecture", d.get("_generated_by", "")),
+        dev_start=_fmt(d.get("_development_start") or d.get("_train_start")),
+        dev_end=_fmt(d.get("_development_end") or d.get("_validation_end")),
+        uns_start=_fmt(d.get("_unseen_start")), uns_end=_fmt(d.get("_unseen_end")),
+        capital=int(r["initial_capital"]), commission=comm_val,
+        slippage=int(e["slippage_ticks"]), tick=e["tick_size"],
+        qstep=r["quantity_step"],
+        ema=int(s["ema_period"]), rsi=int(s["rsi_period"]),
+        ob=round(float(s["rsi_overbought"]), 1), os=round(float(s["rsi_oversold"]), 1),
+        atr=int(s["atr_period"]), cons=int(s["consolidation_candles"]),
+        cmult=round(float(s["consolidation_atr_mult"]), 2),
+        swing=int(s["swing_lookback"]), vsma=int(s["volume_sma_period"]),
+        vmult=round(float(s["volume_mult"]), 2),
+        rr=round(float(s["risk_reward_ratio"]), 2),
+        long_str=long_str, short_str=short_str,
+        enable_long="true" if long_on else "false",
+        enable_short="true" if short_on else "false",
+        lev=round(float(r["leverage"]), 1),
+        risk=round(float(r["risk_per_trade_pct"]), 2),
+        alloc=round(float(r["max_position_allocation_pct"]), 1),
+        bb_enabled="true" if bb_on else "false",
+        bb_len=int(b.get("length", 20)),
+        bb_std=round(float(b.get("std", 2.0)), 2),
+        bb_minbw=round(float(b.get("min_bandwidth_pct", 0.0)), 2),
+        bb_explb=int(b.get("expansion_lookback", 1)),
+        bb_expratio=round(float(b.get("expansion_min_ratio", 0.0)), 2),
+        bb_middist=round(float(b.get("min_mid_distance", 0.0)), 2),
+        ref_dev_ret=_fmt(m.get("development_return_pct")),
+        ref_dev_pf=_fmt(m.get("development_pf")),
+        ref_dev_dd=_fmt(m.get("development_max_dd_pct")),
+        ref_dev_n=_fmt(m.get("development_trades")),
+        ref_uoff_ret=_fmt(uo.get("return_pct")), ref_uoff_pf=_fmt(uo.get("pf")),
+        ref_uoff_dd=_fmt(uo.get("max_dd_pct")), ref_uoff_n=_fmt(uo.get("trades")),
+        ref_uon_ret=_fmt(un.get("return_pct")), ref_uon_pf=_fmt(un.get("pf")),
+        ref_uon_dd=_fmt(un.get("max_dd_pct")), ref_uon_n=_fmt(un.get("trades")),
+    )
+
+
+def export_single_config(cfgfile: str, pinefile: str, title: str = None, short: str = None):
+    # Path traversal and input validation
+    if "/" in cfgfile or "\\" in cfgfile or ".." in cfgfile:
+        raise ValueError(f"input config filename contains path separators or '..': {cfgfile!r}")
+    if not cfgfile.endswith(".json"):
+        raise ValueError(f"input config filename must end with .json: {cfgfile!r}")
+
+    if "/" in pinefile or "\\" in pinefile or ".." in pinefile:
+        raise ValueError(f"output filename contains path separators or '..': {pinefile!r}")
+    if not pinefile.endswith(".pine"):
+        raise ValueError(f"output filename must end with .pine: {pinefile!r}")
+
+    target_path = os.path.join(OUT, pinefile)
+    if os.path.exists(target_path):
+        raise FileExistsError(f"output file already exists: pine/{pinefile}")
+
+    stem = cfgfile.replace(".json", "")
+    title = title or f"ETHUSDT.P 15m — {stem}"
+    short = short or stem[:20]
+
+    rendered_code = render(cfgfile, title, short)
+
+    # Atomic write to pine/ directory
+    os.makedirs(OUT, exist_ok=True)
+    tmp_path = os.path.join(OUT, f".{pinefile}.tmp.{os.getpid()}")
+    try:
+        with open(tmp_path, "w") as fh:
+            fh.write(rendered_code)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, target_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Render Pine strategies from configs/config/*.json")
+    parser.add_argument("--config", help="config file name under configs/config/")
+    parser.add_argument("--out", help="output .pine name under pine/")
+    parser.add_argument("--title", default=None)
+    parser.add_argument("--short", default=None)
+    args = parser.parse_args()
+
+    if not args.config:
+        print("ERROR: --config is required", file=sys.stderr)
+        return 1
+
+    pinefile = args.out or args.config.replace(".json", ".pine")
+    try:
+        export_single_config(args.config, pinefile, args.title, args.short)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

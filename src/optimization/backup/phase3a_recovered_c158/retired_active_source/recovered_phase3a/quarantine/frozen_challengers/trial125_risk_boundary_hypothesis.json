@@ -1,0 +1,85 @@
+{
+  "_name": "Scenario-4 trial 125 \u2014 risk-boundary hypothesis",
+  "_role": "risk-boundary hypothesis",
+  "_region": "B-risk-bound",
+  "_why_frozen": "High leverage 5.0 with low allocation 40% -> risk-budget-bound sizing rather than allocation-bound; also pins ema_period at the historical ceiling 150.",
+  "_status": "FROZEN BENCHMARK \u2014 no winner claim. Selected on DEV evidence only; never validated forward.",
+  "_scenario4_trial_id": 125,
+  "_source_ledger": "src/optimization/recovered_phase3a/quarantine/stage/results/campaign_2y_15m/scenario4/strategy_trials.csv",
+  "_source_ledger_sha256": "863893f71e0d55f9d24f3d9409cb6576f19ccef8cf7373b23a595360876d3b58",
+  "_campaign": "campaign_2y_15m scenario4 (recovered), TPE seed 42, n_jobs=1, 300 trials, profit_first objective",
+  "_dev_window": "2024-07-16 .. 2026-07-15  (TRAIN 70% / VALID 30%, chronological)",
+  "_dev_train": {
+    "return_pct": 13.3452,
+    "profit_factor": 1.0691,
+    "sharpe": 0.4461,
+    "max_dd_pct": 28.8899,
+    "trades": 148,
+    "wins": 35,
+    "losses": 113,
+    "win_rate_pct": 23.6486,
+    "net_profit_after_costs": 20653.75,
+    "net_loss_after_costs": 19319.24,
+    "net_pnl_after_costs": 1334.51,
+    "fees_paid": 1758.69
+  },
+  "_dev_valid": {
+    "return_pct": 20.7222,
+    "profit_factor": 1.3016,
+    "sharpe": 1.1803,
+    "max_dd_pct": 16.0015,
+    "trades": 56,
+    "wins": 16,
+    "losses": 40,
+    "win_rate_pct": 28.5714,
+    "net_profit_after_costs": 8943.43,
+    "net_loss_after_costs": 6871.25,
+    "net_pnl_after_costs": 2072.18,
+    "fees_paid": 829.62
+  },
+  "_scenario4_score": 0.184795,
+  "_notes": "Metadata is informational only and ignored at runtime. Bollinger stored DISABLED with neutral values: no Bollinger tuning has been applied to this candidate.",
+  "_risk_policy": "preset",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": {
+    "ema_period": 150,
+    "rsi_period": 13,
+    "rsi_overbought": 79.0,
+    "rsi_oversold": 31.0,
+    "atr_period": 13,
+    "consolidation_candles": 8,
+    "consolidation_atr_mult": 2.3,
+    "swing_lookback": 19,
+    "volume_sma_period": 25,
+    "volume_mult": 0.8,
+    "risk_reward_ratio": 4.0,
+    "long_enabled": true,
+    "short_enabled": false
+  },
+  "risk": {
+    "sizing_mode": "RISK_BASED",
+    "initial_capital": 10000.0,
+    "leverage": 5.0,
+    "risk_per_trade_pct": 1.6,
+    "max_position_allocation_pct": 40.0,
+    "quantity_step": 0.001
+  },
+  "execution": {
+    "commission_pct": 0.05,
+    "slippage_ticks": 1,
+    "tick_size": 0.01
+  },
+  "filters": {
+    "bollinger": {
+      "enabled": false,
+      "length": 20,
+      "std": 2.0,
+      "min_bandwidth_pct": 0.0,
+      "expansion_lookback": 5,
+      "expansion_min_ratio": 0.0,
+      "min_mid_distance": 0.0
+    }
+  }
+}
