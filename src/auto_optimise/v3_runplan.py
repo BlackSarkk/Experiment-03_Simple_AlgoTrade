@@ -24,10 +24,10 @@ def _flag(enabled: bool) -> str:
     return ui.ok("ON") if enabled else ui.warn("OFF")
 
 
-def _dataprep_ratios():
+def _dataprep_ratios(unseen_pct: float = 20.0):
     """Effective ratios without importing pandas — read straight from the policy."""
     from optimization.v3 import spec as _spec           # stdlib-only
-    unseen = 0.20
+    unseen = float(unseen_pct) / 100.0
     dev = 1.0 - unseen
     return {"unseen_pct": round(100 * unseen, 1),
             "dev_train_pct": round(100 * _spec.TRAIN_FRAC, 1),
@@ -121,7 +121,8 @@ def render(preset, output, rules=None, facts=None) -> str:
                    "inaccessible"))
         add(ui.dim("    until the single final confirmation, after the winner is frozen."))
     else:
-        _r = _dataprep_ratios()
+        part = getattr(preset, "partition", None)
+        _r = _dataprep_ratios(getattr(part, "unseen_pct", 20.0) if part is not None else 20.0)
         c_count = preset.history.evaluable_candles(preset.timeframe)
         train_est = int(round(c_count * (_r['train_pct'] / 100.0)))
         valid_est = int(round(c_count * (_r['valid_pct'] / 100.0)))

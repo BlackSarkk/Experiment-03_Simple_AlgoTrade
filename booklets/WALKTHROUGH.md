@@ -140,14 +140,29 @@ trade, PnL or drawdown.
 ## 5. Historical replay flow
 
 `HistoricalReplayEngine` subclasses `PaperForwardEngine` but is fed the same
-indicator-attached, window-sliced frame the backtest uses, so the two cannot drift.
-It replays candle-by-candle (open tick → intrabar ticks → close tick → candle-close
-callback), writing to `results/replay/`. Its state lives in `logs/replay_state.json`,
-fully isolated from live paper state.
+indicator-attached, window-sliced frame the backtest uses, **and the same filtered strategy
+object** (`main.py` puts the replay engine through the same `_apply_filters(...)`), so the
+two cannot drift. It replays candle-by-candle (open tick → intrabar ticks → close tick →
+candle-close callback), writing to `<results_dir>/replay/`. Its state and file log live in
+`<logs_dir>/replay_state.json` and `<logs_dir>/replay_debug.log`, isolated from live paper
+state — the replay repoints the `PaperEngine` file handler at construction, because
+`paper_engine` binds its log path at import time before any config exists.
 
-Backtest and replay agree trade-for-trade on entry/exit timestamps, prices, quantity,
-SL/TP, fees and PnL. The backtest reports one extra trade: it force-closes an open
-position at the final candle with `exit_reason = END_OF_DATA`; replay leaves it open.
+**Signals are resolved once over the whole frame.** `WholeFrameSignals` runs the real
+strategy — `MaskedStrategy` with a Bollinger mask included — exactly as the backtest does,
+then serves back the signal for each closed candle. The per-bar rolling slice the replay
+loop uses is far too short to carry a frame-wide filter mask, so anything resolved per slice
+would ignore filters entirely.
+
+Replay also writes a **per-bar equity curve** to `<results_dir>/replay/equity_curve.csv`,
+using the same mark-to-market helper as the live snapshot.
+
+Backtest and replay agree trade-for-trade on signal/entry/exit timestamps, prices, quantity,
+SL/TP, fees, gross and net PnL, and on the equity curve row for row. The backtest reports one
+extra trade: it force-closes an open position at the final candle with
+`exit_reason = END_OF_DATA`; replay correctly leaves it open (its entry fields still match).
+Verified on config2 (Bollinger ON) against fresh Binance 15m candles: 16 common closed
+trades, all fields exact.
 
 ---
 
@@ -168,6 +183,20 @@ position, performance and feed health.
 the cached span covers the requested range and re-fetches when it does not. The cache
 may be **wider** than the evaluation window; the evaluation window is never wider than
 requested.
+
+**Optimizer data preparation validates the cache twice.** For the bar-count-driven history
+modes (`auto`, `candles`), `auto_optimise/dataprep._load_raw` requires both:
+
+1. **depth** — at least `warmup + evaluable` bars (AUTO: 1,000 + 43,200 = 44,200);
+2. **recency** — the last cached candle no more than one bar behind the newest candle the
+   exchange can have closed.
+
+Too shallow → re-fetch with an explicit start derived from the requirement (not the
+loader's generic one-year fallback, which is short of 43,200 bars on every timeframe of 1h
+and above). Stale but deep → fetch only the missing tail and union it onto the cache, so a
+long history (the 15m file feeds other stages' warmup) is extended, never truncated.
+Either way `auto` reports "availability-limited" only when Binance genuinely has no more
+history. `days` and `date_range` are date-driven and keep their previous load behaviour.
 
 ---
 
@@ -208,10 +237,13 @@ restart its rolling windows at the window edge and silently change results.
 
 **Wiring.** `main.py` reads `filters.bollinger` from the preset, computes the allow mask on
 the full frame, slices it, and injects `MaskedStrategy` (`src/filters/masked_strategy.py`)
-via `engine.strategy`. `MaskedStrategy` is filter-agnostic: it applies any precomputed
-boolean mask, so a future filter reuses it without depending on another filter's package.
-With Bollinger disabled no mask is built at all and the run is byte-identical to the
-unfiltered baseline.
+via `engine.strategy` — into **both** the backtest engine and the historical replay engine.
+`MaskedStrategy` is filter-agnostic: it applies any precomputed boolean mask, so a future
+filter reuses it without depending on another filter's package. With Bollinger disabled no
+mask is built at all and the run is byte-identical to the unfiltered baseline.
+
+Historical replay previously received no mask and silently ran the unfiltered strategy —
+a filtered config could not be replay-validated. It now applies the identical mask; see §5.
 
 ## 10. Optimizer folders
 
@@ -314,9 +346,12 @@ warmup, partition ratios, seeds and storage paths stay automatic.
 
 | Field | Meaning |
 |---|---|
+| `_schema_version` | must be `3` |
 | `platform`, `symbol`, `timeframe` | what to optimize on (`1m…4h`) |
-| `history.days` **or** `history.start_date`+`end_date` | mutually exclusive; one is required |
+| `history.mode` | `auto` \| `days` \| `date_range` \| `candles`; only that mode's fields may be non-null |
 | `initial_balance` | starting equity |
+| `execution.tick_size` *(optional)* | `"auto"` (exchange `PRICE_FILTER`) or a positive multiple of it |
+| `partition.unseen_pct` **or** `partition.unseen_start` *(optional)* | UNSEEN share (5–40, default 20) or an exact boundary date; mutually exclusive |
 | `direction.long_enabled` / `short_enabled` | at least one must be true |
 | `trials` | `"auto"` or a whole number |
 | `optimization_mode` | `balanced` / `conservative` / `aggressive` |
@@ -333,6 +368,20 @@ only**; the risk and Bollinger stages derive their own smaller budgets. The
 mapping and its rationale live in `src/auto_optimise/trials.py` and is currently
 provisional pending a timed measurement.
 
+**History `auto`.** Targets 43,200 evaluable bars plus 1,000 warmup, resolved against real
+availability during data preparation (§7). It reports "availability-limited" only when the
+exchange genuinely has less history — a short or stale cache triggers a fetch instead.
+
+**Partitions.** UNSEEN is carved off the end first, then canonical V3 splits the remaining
+DEV 70/30 — so the default effective split is **TRAIN 56% / VALID 24% / UNSEEN 20%**.
+`partition.unseen_pct` changes the reservation; `partition.unseen_start` pins the boundary
+to an exact date for reproducing a historical campaign, and the emitted config records which
+of the two set the boundary.
+
+**Market rules.** Tick size and quantity step are resolved from the exchange per run and
+applied to every trial, so a campaign is not restricted to symbols hardcoded in
+`optimization/v3/spec.py`.
+
 ### Campaign stages
 
 ```
@@ -346,8 +395,10 @@ provisional pending a timed measurement.
 ```
 
 Disabled stages print as `SKIPPED` and are excluded from ETA estimation.
-Partitioning is fixed policy: chronological **TRAIN 60 / VALID 20 / UNSEEN 20** by
-calendar date, plus a separate warmup block before TRAIN. Ranking uses TRAIN +
+Partitioning is policy, not a search input: UNSEEN is reserved off the end **first**
+(default 20%, or `partition.unseen_pct` / `partition.unseen_start`), then canonical V3
+splits the remaining DEV 70/30 **by row count** — effective **TRAIN 56 / VALID 24 /
+UNSEEN 20** — plus a separate warmup block before TRAIN. Ranking uses TRAIN +
 VALIDATION only; UNSEEN unlocks once after the Top-10 is frozen and never
 reorders it.
 

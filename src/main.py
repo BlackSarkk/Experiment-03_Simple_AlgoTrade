@@ -351,7 +351,9 @@ def run_pipeline(cfg: PipelineConfig, clear_cache_only: bool = False, maintenanc
             logger.info(f"Executing Historical Replay Forward Engine (Mode: {cfg.forward_mode})...")
             # Pass the SAME indicator-attached, evaluation-window-sliced frame the backtest
             # uses, so the two paths cannot drift on range or warmup handling.
-            forward_engine = HistoricalReplayEngine(cfg, df_indicators)
+            # Same filtered strategy the backtest gets: the replay resolves signals over the
+            # whole frame, so a mask sliced to this frame applies identically in both paths.
+            forward_engine = _apply_filters(HistoricalReplayEngine(cfg, df_indicators))
             forward_engine.run_replay()
         else:
             logger.info(f"Executing Paper Forward Testing Engine (Mode: {cfg.forward_mode})...")

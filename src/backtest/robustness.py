@@ -102,8 +102,8 @@ class RobustnessEvaluator:
             data_dir=self.base_cfg.data_dir,
             results_dir=self.base_cfg.results_dir
         )
-        cfg.platform.symbol = "ETHUSDT"
-        cfg.platform.platform = "BINANCE_FUTURES"
+        cfg.platform.symbol = self.base_cfg.platform.symbol
+        cfg.platform.platform = self.base_cfg.platform.platform
         cfg.platform.resolution = tf
         cfg.platform.start_date = "2024-01-01"
         cfg.platform.end_date = "2026-08-13"
@@ -152,8 +152,8 @@ class RobustnessEvaluator:
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "stage": stage,
-            "symbol": "ETHUSDT",
-            "platform": "BINANCE_FUTURES",
+            "symbol": cfg.platform.symbol,
+            "platform": cfg.platform.platform,
             "timeframe": tf,
             "start_date": start_date,
             "end_date": end_date,

@@ -188,6 +188,66 @@ def _checksum(df: pd.DataFrame) -> str:
     return hashlib.sha256(hashed.tobytes()).hexdigest()[:16]
 
 
+# Extra span requested on top of the bars the history actually needs, to absorb exchange
+# gaps, maintenance windows and the trailing incomplete candle.
+FETCH_MARGIN = 1.25
+FETCH_SLACK_DAYS = 2
+
+# How far the cache's last complete candle may lag the exchange's before the tail is
+# refreshed. One bar absorbs the race between "latest complete candle" and the fetch
+# itself; anything beyond that is a stale cache, not a timing artifact.
+STALE_TOLERANCE_BARS = 1
+
+
+def _required_total_bars(preset) -> Optional[int]:
+    """Bars this history needs (warmup included), when it is bar-count driven.
+
+    `days` and `date_range` are date-driven and resolve their own window later, so they
+    return None and keep their existing load behaviour untouched.
+    """
+    hist = preset.history
+    if hist.mode == "auto":
+        return history_mod.AUTO_WARMUP_BARS + history_mod.AUTO_TARGET_EVALUABLE_BARS
+    if hist.mode == "candles":
+        return history_mod.AUTO_WARMUP_BARS + int(hist.candles)
+    return None
+
+
+def _extend_tail(loader, cached: pd.DataFrame, preset, tf_minutes: int,
+                 cache_end, now, cache_path: str, quiet: bool) -> pd.DataFrame:
+    """Fetch only the candles after `cache_end` and union them onto the cache.
+
+    Deliberately additive: the cache may hold years more history than this run needs (the
+    15m file feeds other stages' warmup), so a stale tail must never trigger a bounded
+    re-fetch that would rewrite the file with a shorter span. On any fetch problem the
+    cached frame is returned unchanged and the normal availability reporting takes over.
+    """
+    gap_days = max(1, int((now - cache_end).total_seconds() // 86400) + 1)
+    try:
+        tail = loader.download_binance_klines(
+            symbol=preset.symbol, interval=preset.timeframe, days=gap_days, quiet=quiet)
+    except Exception as exc:                       # network, HTTP, empty response
+        if not quiet:
+            print(f"      tail refresh failed ({exc}); continuing with the cached history")
+        return cached
+
+    if tail is None or tail.empty:
+        return cached
+
+    merged = (pd.concat([cached, tail], ignore_index=True)
+                .drop_duplicates("timestamp", keep="last")
+                .sort_values("timestamp")
+                .reset_index(drop=True))
+    merged["datetime"] = pd.to_datetime(merged["timestamp"], unit="s", utc=True)
+
+    if len(merged) >= len(cached):
+        merged.to_csv(cache_path, index=False)
+        if not quiet:
+            new_end = merged["datetime"].iloc[-1]
+            print(f"      tail extended to {new_end} (+{len(merged) - len(cached):,} bars)")
+    return merged
+
+
 def _load_raw(preset, data_dir: str, quiet: bool) -> tuple[pd.DataFrame, str, bool]:
     """Load all available complete candles for the platform/symbol/timeframe."""
     tf_minutes = int(history_mod.parse_timeframe_minutes(preset.timeframe))
@@ -202,14 +262,53 @@ def _load_raw(preset, data_dir: str, quiet: bool) -> tuple[pd.DataFrame, str, bo
     source_timeframe = "1h" if needs_resample else preset.timeframe
     is_resampled = needs_resample
 
+    required_bars = _required_total_bars(preset)
+
+    bar = pd.Timedelta(minutes=tf_minutes)
+    now = pd.Timestamp.now(tz="UTC")
+    # Newest candle the exchange can already have closed.
+    latest_complete = now.floor(bar) - bar
+
     cache_path = loader.get_cache_filename(preset.symbol, preset.timeframe, preset.platform)
+    df = None
     if os.path.exists(cache_path):
         df = pd.read_csv(cache_path)
-    else:
+        # A cache file was previously accepted verbatim, however short and however old.
+        # Bar-count-driven history anchors its window to the newest data, so BOTH have to
+        # hold: enough bars, and a tail that reaches the present.
+        if required_bars is not None:
+            cache_end = pd.to_datetime(df["datetime"], utc=True).max() if len(df) else None
+            too_short = len(df) < required_bars + 1
+            too_old = (cache_end is None or
+                       cache_end < latest_complete - STALE_TOLERANCE_BARS * bar)
+            if too_short:
+                if not quiet:
+                    print(f"      cached {preset.timeframe} history has {len(df):,} bars, "
+                          f"{required_bars:,} required — re-fetching from the exchange")
+                df = None
+            elif too_old:
+                behind = int((latest_complete - cache_end) / bar)
+                if not quiet:
+                    print(f"      cached {preset.timeframe} history ends {cache_end} "
+                          f"({behind:,} bars behind {latest_complete}) — extending the tail")
+                df = _extend_tail(loader, df, preset, tf_minutes, cache_end, now,
+                                  cache_path, quiet)
+
+    if df is None:
         cfg.platform.days = None
-        cfg.platform.start_date = None
         cfg.platform.end_date = None
-        df = loader.load_ohlcv(cfg.platform, reset_cache=False, quiet=quiet)
+        if required_bars is None:
+            cfg.platform.start_date = None
+        else:
+            # Ask for the span the requested history actually needs, instead of the
+            # loader's generic 1-year fallback (which is short of 43,200 bars on every
+            # timeframe of 1h and above, and unnecessarily long on 1m).
+            span_minutes = required_bars * tf_minutes * FETCH_MARGIN
+            span = pd.Timedelta(minutes=span_minutes) + pd.Timedelta(days=FETCH_SLACK_DAYS)
+            start = pd.Timestamp.now(tz="UTC") - span
+            cfg.platform.start_date = start.strftime("%Y-%m-%d %H:%M:%S")
+        df = loader.load_ohlcv(cfg.platform, reset_cache=os.path.exists(cache_path),
+                               quiet=quiet)
 
     if df is None or df.empty:
         raise DataPreparationError(
@@ -220,9 +319,7 @@ def _load_raw(preset, data_dir: str, quiet: bool) -> tuple[pd.DataFrame, str, bo
     df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
     df = df.sort_values("datetime").drop_duplicates("datetime").reset_index(drop=True)
 
-    bar = pd.Timedelta(minutes=tf_minutes)
-    now = pd.Timestamp.now(tz="UTC")
-    df = df.loc[df["datetime"] + bar <= now].reset_index(drop=True)
+    df = df.loc[df["datetime"] + bar <= pd.Timestamp.now(tz="UTC")].reset_index(drop=True)
     if df.empty:
         raise DataPreparationError(
             f"no closed candles available for {preset.symbol} {preset.timeframe}"
@@ -324,7 +421,25 @@ def prepare(preset, data_dir: str = "data", quiet: bool = True,
     if eval_len == 0:
         raise DataPreparationError("requested window contains no candles")
 
-    unseen_count = int(round(eval_len * UNSEEN_FRACTION))
+    # The preset's partition block is authoritative when present: either an explicit
+    # UNSEEN share, or an exact boundary date that pins UNSEEN for reproduction.
+    part = getattr(preset, "partition", None)
+    unseen_fraction = UNSEEN_FRACTION
+    unseen_pinned = False
+    if part is not None and getattr(part, "unseen_start", None) is not None:
+        boundary = pd.Timestamp(part.unseen_start, tz="UTC")
+        eval_dt = evaluation["datetime"]
+        unseen_count = int((eval_dt >= boundary).sum())
+        if unseen_count == 0 or unseen_count == eval_len:
+            raise DataPreparationError(
+                f"partition.unseen_start {part.unseen_start} does not fall inside the "
+                f"evaluable window ({_fmt(eval_dt.iloc[0])} -> {_fmt(eval_dt.iloc[-1])})"
+            )
+        unseen_pinned = True
+    else:
+        if part is not None and getattr(part, "unseen_pct", None) is not None:
+            unseen_fraction = float(part.unseen_pct) / 100.0
+        unseen_count = int(round(eval_len * unseen_fraction))
     dev_count = eval_len - unseen_count
 
     dev_train_count = int(round(dev_count * DEV_TRAIN_FRACTION))
@@ -384,6 +499,7 @@ def prepare(preset, data_dir: str = "data", quiet: bool = True,
         unseen_end=u_end,
         unseen_candles=len(unseen_df),
         raw_full=full,
+        _unseen_pinned=unseen_pinned,
         _bounds={
             "train": (train_start_idx, train_end_idx),
             "validation": (train_end_idx, valid_end_idx),

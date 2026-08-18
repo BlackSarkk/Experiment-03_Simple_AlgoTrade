@@ -1,39 +1,40 @@
-  {
-    "_schema_version": 2,
-    "_comment": "Human-facing optimizer input for the canonical V3 pipeline. Search ranges, objective weights, Optuna internals, warmup, per-stage trial budgets, seeds and storage paths are automatic and deliberately not exposed here.",
+{
+  "_schema_version": 3,
+  "_comment": "Human-facing optimizer input for the canonical V3 pipeline. Search ranges, objective weights, Optuna internals, warmup, per-stage trial budgets, seeds and storage paths are automatic and deliberately not exposed here.",
 
-    "platform": "BINANCE_FUTURES",
-    "symbol": "ETHUSDT",
-    "timeframe": "1m",
+  "platform": "BINANCE_FUTURES",
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
 
-    "_history_comment": "Choose EXACTLY ONE mode: days | start_date + end_date | candles. Leave the others null.",
-    "history": {
-      "days": 3,
-      "start_date": null,
-      "end_date": null,
-      "candles": null
-    },
+  "_history_comment": "Choose history.mode: auto | days | date_range | candles. Only fields required by the chosen mode may be non-null. Warmup candles are added automatically and are not part of the requested history.",
+  "history": {
+    "mode": "auto",
+    "days": null,
+    "start_date": null,
+    "end_date": null,
+    "candles": null
+  },
 
-    "initial_balance": 10000,
+  "initial_balance": 10000,
 
-    "direction": {
-      "long_enabled": true,
-      "short_enabled": false
-    },
+  "direction": {
+    "long_enabled": true,
+    "short_enabled": false
+  },
 
-    "_execution_comment": "tick_size is \"auto\" (resolved from Binance Futures PRICE_FILTER.tickSize for this symbol) or a positive number validated against that same metadata. The quantity step is always resolved automatically from LOT_SIZE.stepSize.",
-    "execution": {
-      "tick_size": "auto"
-    },
+  "_execution_comment": "tick_size is \"auto\" (resolved from Binance Futures PRICE_FILTER.tickSize for this symbol) or a positive number validated against that same metadata. The quantity step is always resolved automatically from LOT_SIZE.stepSize.",
+  "execution": {
+    "tick_size": "auto"
+  },
 
-    "_trials_comment": "TOTAL trials across all five V3 stages. 1850 allocates exactly 400/800/200/300/150. \"auto\" picks a documented total from timeframe and history length; the run plan prints the five budgets before anything runs.",
-    "trials": "auto",
+  "_trials_comment": "TOTAL trials across all five V3 stages. 1850 allocates exactly 400/800/200/300/150. \"auto\" picks a documented total from timeframe and history length; the run plan prints the five budgets before anything runs.",
+  "trials": "auto",
 
-    "optimization_mode": "balanced",
+  "optimization_mode": "balanced",
 
-    "stages": {
-      "strategy_optimization": true,
-      "risk_management": true,
-      "bollinger": true
-    }
+  "stages": {
+    "strategy_optimization": true,
+    "risk_management": true,
+    "bollinger": true
   }
+}

@@ -130,7 +130,7 @@ def run_campaign(preset, output, resume: bool = True, show_dashboard: bool = Tru
     try:
         result = v3_stages.run(preset, prepared, allocation,
                                progress=lambda m: emit("      " + ui.dim(m)),
-                               show_dashboard=show_dashboard)
+                               show_dashboard=show_dashboard, rules=rules)
     except v3_stages.StageFailure as exc:
         emit(ui.err(f"      FAILED — {exc}"))
         emit(ui.warn("No output config written: a required stage produced no result."))

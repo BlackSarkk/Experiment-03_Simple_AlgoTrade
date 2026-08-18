@@ -40,7 +40,8 @@ KNOWN_FLAGS=(--backtest --forward-test --historical-replay --robustness --optimi
 # ------------------------------------------------------------------
 usage() {
   cat <<'EOF'
-ETH Strategy Pipeline — rule-based ETHUSDT.P research pipeline
+Strategy Pipeline — rule-based perpetual-futures research pipeline
+(symbol, timeframe and platform come from the active config)
 
 USAGE
   ./pipeline.sh --config <config-file> <action> [options]

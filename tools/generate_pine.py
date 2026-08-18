@@ -51,7 +51,7 @@ strategy("{title}", shorttitle="{short}", overlay=true, initial_capital={capital
 //   Unseen OFF   : {ref_uoff_ret}% return, PF {ref_uoff_pf}, DD {ref_uoff_dd}%, {ref_uoff_n} trades
 //   Unseen ON    : {ref_uon_ret}% return, PF {ref_uon_pf}, DD {ref_uon_dd}%, {ref_uon_n} trades
 //
-// IMPORTANT: run on BINANCE:ETHUSDT.P, 15m.
+// IMPORTANT: run on {tv_symbol}, {tf}.
 // =============================================================================
 
 // =============================================================================
@@ -270,7 +270,7 @@ if show_hud and barstate.islast
     win_rate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100.0 : 0.0
     net_pnl = strategy.netprofit
     pnl_color = net_pnl >= 0 ? #10b981 : #ef4444
-    pos_str = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size, "#.###") + " ETH)" : strategy.position_size < 0 ? "SHORT (" + str.tostring(math.abs(strategy.position_size), "#.###") + " ETH)" : "FLAT"
+    pos_str = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size, "#.###") + " {base_asset})" : strategy.position_size < 0 ? "SHORT (" + str.tostring(math.abs(strategy.position_size), "#.###") + " {base_asset})" : "FLAT"
     table.cell(hud, 0, 0, "Config", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
     table.cell(hud, 1, 0, "{short}", text_color=#38bdf8, text_size=size.small, text_halign=text.align_right)
     table.cell(hud, 0, 1, "Net Profit ($)", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
@@ -292,6 +292,39 @@ if show_hud and barstate.islast
 
 def _fmt(value, default="n/a"):
     return default if value is None else value
+
+
+QUOTE_ASSETS = ("USDT", "USDC", "BUSD", "USD", "PERP")
+
+EXCHANGE_PREFIX = {
+    "BINANCE_FUTURES": "BINANCE",
+    "BINANCE": "BINANCE",
+    "DELTA": "DELTA",
+}
+
+
+def _base_asset(symbol: str) -> str:
+    """Base asset of a symbol, for display only (ETHUSDT -> ETH)."""
+    up = symbol.upper()
+    for quote in QUOTE_ASSETS:
+        if up.endswith(quote) and len(up) > len(quote):
+            return up[: -len(quote)]
+    return up
+
+
+def _instrument(d: dict) -> tuple:
+    """(symbol, timeframe, tradingview symbol) taken from the config, never hardcoded."""
+    s = d.get("strategy", {}) if isinstance(d.get("strategy"), dict) else {}
+    symbol = str(d.get("symbol") or s.get("symbol") or "").strip().upper()
+    timeframe = str(d.get("timeframe") or s.get("resolution") or "").strip()
+    platform = str(d.get("platform", "BINANCE_FUTURES")).strip().upper()
+    if not symbol:
+        raise ConfigValidationError("config is missing 'symbol'")
+    if not timeframe:
+        raise ConfigValidationError("config is missing 'timeframe'")
+    prefix = EXCHANGE_PREFIX.get(platform, platform)
+    suffix = ".P" if platform.endswith("_FUTURES") else ""
+    return symbol, timeframe, f"{prefix}:{symbol}{suffix}"
 
 
 def validate_config(d: dict, cfgfile: str):
@@ -348,7 +381,7 @@ def validate_config(d: dict, cfgfile: str):
         )
 
 
-def render(cfgfile: str, title: str, short: str) -> str:
+def render(cfgfile: str, title: str = None, short: str = None) -> str:
     cfg_path = os.path.join(CONFIG_DIR, cfgfile)
     if not os.path.exists(cfg_path):
         raise ConfigValidationError(f"config file does not exist: {cfg_path}")
@@ -360,6 +393,11 @@ def render(cfgfile: str, title: str, short: str) -> str:
         raise ConfigValidationError(f"config {cfgfile} is not valid JSON: {exc}")
 
     validate_config(d, cfgfile)
+
+    symbol, timeframe, tv_symbol = _instrument(d)
+    stem = cfgfile[: -len(".json")] if cfgfile.endswith(".json") else cfgfile
+    title = title or f"{symbol}{'.P' if tv_symbol.endswith('.P') else ''} {timeframe} — {stem}"
+    short = short or stem[:20]
 
     s = d["strategy"]
     r = d["risk"]
@@ -382,6 +420,7 @@ def render(cfgfile: str, title: str, short: str) -> str:
 
     return TEMPLATE.format(
         title=title, short=short, cfgfile=cfgfile,
+        tv_symbol=tv_symbol, tf=timeframe, base_asset=_base_asset(symbol),
         source=d.get("_source", d.get("_description", "")),
         arch=d.get("_optimizer_architecture", d.get("_generated_by", "")),
         dev_start=_fmt(d.get("_development_start") or d.get("_train_start")),
@@ -436,10 +475,6 @@ def export_single_config(cfgfile: str, pinefile: str, title: str = None, short: 
     target_path = os.path.join(OUT, pinefile)
     if os.path.exists(target_path):
         raise FileExistsError(f"output file already exists: pine/{pinefile}")
-
-    stem = cfgfile.replace(".json", "")
-    title = title or f"ETHUSDT.P 15m — {stem}"
-    short = short or stem[:20]
 
     rendered_code = render(cfgfile, title, short)
 

@@ -294,16 +294,23 @@ repeat
 Its parity target is:
 
 ``` text
-same candles + same config
+same candles + same config + same filtered strategy object
 
 BACKTEST                  HISTORICAL REPLAY
 signals       ==          signals
+filter blocks ==          filter blocks
 entries       ==          entries
 exits         ==          exits
 SL/TP         ==          SL/TP
 quantity      ==          quantity
+fees          ==          fees
 PnL           ==          PnL
+equity curve  ==          equity curve
 ```
+
+Only one difference is allowed: the position still open on the final candle. The
+backtest force-closes it (`exit_reason = END_OF_DATA`); replay keeps it open, which is
+what a forward engine should do. Its entry side still matches exactly.
 
 This is useful for detecting lookahead and differences between research
 and forward execution.
@@ -444,32 +451,27 @@ found.
 
 # 11. Stage \[1/6\] --- Data Preparation
 
-History can be requested as latest N days:
+History is requested by **mode** — exactly one, with every other field null:
 
 ``` json
-"history": {
-  "days": 180,
-  "start_date": null,
-  "end_date": null
-}
+"history": { "mode": "auto",  "days": null, "start_date": null, "end_date": null, "candles": null }
+"history": { "mode": "days",  "days": 180,  "start_date": null, "end_date": null, "candles": null }
+"history": { "mode": "date_range", "days": null, "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "candles": null }
+"history": { "mode": "candles", "days": null, "start_date": null, "end_date": null, "candles": 50000 }
 ```
 
-or explicit dates:
+`auto` targets **43,200 evaluable bars + 1,000 warmup**, resolved against real
+availability at preparation time. If the local cache is too shallow or its tail is stale,
+it fetches or extends rather than quietly shrinking the window; "availability-limited" is
+reported only when the exchange genuinely has no more history.
 
-``` json
-"history": {
-  "days": null,
-  "start_date": "YYYY-MM-DD",
-  "end_date": "YYYY-MM-DD"
-}
-```
-
-Canonical chronological split:
+Canonical chronological split — UNSEEN is reserved **first**, then canonical V3 splits the
+remaining DEV 70/30:
 
 ``` text
-TRAIN       60%
-VALIDATION  20%
-UNSEEN      20%
+TRAIN       56%      (70% of DEV)
+VALIDATION  24%      (30% of DEV)
+UNSEEN      20%      (reserved first)
 ```
 
 Never shuffled.
@@ -477,9 +479,13 @@ Never shuffled.
 ``` text
 earlier                                                later
 
-[ WARMUP ][──────── TRAIN 60% ────────][ VALID 20% ][ UNSEEN 20% ]
-                                                       LOCKED
+[ WARMUP ][────── TRAIN 56% ──────][ VALID 24% ][ UNSEEN 20% ]
+                                                    LOCKED
 ```
+
+`partition.unseen_pct` (5–40) changes the reservation; `partition.unseen_start` pins the
+boundary to an exact date instead. Both are honoured by data preparation and recorded in
+the emitted config's `_partition_policy`.
 
 Warmup belongs to no metrics partition.
 

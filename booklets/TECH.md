@@ -114,12 +114,30 @@ is ignored — it is NOT wired up merely by being present in the JSON.
 ## 4. Engine parity rules
 
 Must remain identical between Backtest and Historical Replay:
-entry timestamp, entry price, quantity, SL, TP, exit timestamp, exit price, exit reason,
-fees, net PnL. The only permitted difference is the terminal `END_OF_DATA` trade.
+signal timestamp, entry timestamp, entry price, quantity, SL, TP, exit timestamp,
+exit price, exit reason, fees, gross PnL, net PnL, the filter/Bollinger decision, and the
+per-bar equity curve. The only permitted difference is the terminal `END_OF_DATA` trade.
 
 Both must receive the **same indicator-attached, window-sliced frame** — `main.py`
 passes `df_indicators` to both. Never let replay recompute indicators from a sliced
 frame (that silently discards warmup).
+
+Both must also receive the **same strategy object**. `main.py` runs the replay engine
+through the same `_apply_filters(...)` as the backtest, and `HistoricalReplayEngine`
+resolves signals **once over the whole frame** (`WholeFrameSignals`) — the identical
+`generate_signals(df)` call the backtest makes — then serves back the signal belonging to
+each closed candle. Replay's rolling ~`required_history_bars()` slice cannot carry a
+frame-wide mask, so resolving per slice would silently drop every filter.
+
+Equity: replay writes one row per closed candle via `PaperForwardEngine.equity_snapshot_row()`,
+the same mark-to-market helper the live 10-minute snapshot uses. On tick-aligned data the
+curve matches the backtest's row for row.
+
+**Known frozen-engine quirk.** On the *entry bar only*, `BacktestEngine` marks to market
+against the unrounded realized entry while storing and thereafter using the tick-rounded
+entry price. On real (tick-aligned) data the two are the same number; on synthetic raw-float
+prices they differ by up to half a tick × size for one bar. `BacktestEngine` is frozen —
+fixtures must use tick-aligned prices rather than replay reproducing the artifact.
 
 Pine parity: identical signal logic, SL rule, RR, sizing formulas, fee/slippage model,
 next-bar entry, SL priority.
@@ -209,6 +227,13 @@ bash -n pipeline.sh
 
 # 7 unit tests
 PYTHONPATH=src .venv/bin/pytest tests/unit -q
+
+# 8 offline suites (no network, no production writes) — the routine regression gate
+./.venv/bin/python -m pytest -q tests/unit tests/auto_optimise tests/test_pine_export.py \
+    tests/test_v3_optimizer.py tests/test_v3_dashboard.py \
+    tests/test_config_derived_instrument.py tests/parity/test_replay_backtest_parity.py
+#    tests/regression and tests/integration are NOT in this set: they fetch market data and
+#    write results/ at import time. Run them deliberately, never as a routine check.
 ```
 Note: `tests/unit/test_engine.py::test_leverage_1_vs_3_5_risk_budget` fails at
 `149.99 != 150.00` — quantity-step flooring makes realized risk land just under budget.
@@ -311,10 +336,16 @@ missing file → 1 (lists available configs); malformed JSON → 1; schema-inval
 
 1. `main.py` ignores `use_trend_filter` / `trend_ema_period` / `use_ema_slope_filter`, so a
    regime filter cannot be enabled from preset JSON. (`filters.bollinger` **is** wired and
-   verified working — config2 blocks 357 signals on 2024-01-01..2026-08-15.)
+   verified working — config2 blocks 357 signals on 2024-01-01..2026-08-15, and since the
+   replay wiring fix it blocks the identical set in historical replay.)
 2. `--reset` deletes forward artifacts **before** `archive_previous_experiment()` runs,
    so `--forward-test --reset` discards instead of archiving.
 3. `tests/unit/test_engine.py::test_leverage_1_vs_3_5_risk_budget` tolerance too tight.
+3b. `tests/auto_optimise/test_stage3.py`, `test_stage5.py`, `test_stage6.py` and
+   `test_boundary_audit.py` error at collection: they load an optimizer preset
+   `olong3y.json` that does not exist in `configs/optimize/`. Stale fixtures, not app
+   defects. Current offline baseline: **8 failed, 19 errors** — any change to that set is a
+   regression.
 4. `pine/config1-ETHUSDTP15m-long.pine` line 5 names its source as
    `configs/config1-ETHUSDTP15m.json` (missing `-long`). Cosmetic comment typo only; the
    file is PROTECTED and was deliberately left untouched.

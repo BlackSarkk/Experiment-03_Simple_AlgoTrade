@@ -5,6 +5,38 @@ from common.config import PipelineConfig
 from forward_test.paper_engine import PaperForwardEngine
 from strategy.indicators import compute_all_indicators
 
+
+class WholeFrameSignals:
+    """Serve the backtest's signal set to the replay engine, one closed candle at a time.
+
+    BacktestEngine calls `generate_signals(df)` ONCE on the whole evaluation frame and
+    indexes the result by candle. The replay loop instead hands the strategy a short
+    rolling slice per bar, which restarts every rolling window at the slice edge and makes
+    frame-wide gates (a Bollinger mask, for one) impossible to apply.
+
+    This adapter closes that gap without touching either engine or duplicating any
+    calculation: the REAL strategy — whatever `main.py` injected, `MaskedStrategy` with a
+    filter mask included — is run once over the full frame here, exactly as the backtest
+    runs it. Per bar, the adapter simply hands back the signal belonging to the candle that
+    just closed (the last row of the slice), so `signals[-1]` and the engine's
+    signal-timestamp freshness check downstream keep working unchanged.
+    """
+
+    def __init__(self, strategy, df_full: pd.DataFrame):
+        self.strategy = strategy
+        signals = strategy.generate_signals(df_full)
+        self.by_timestamp = {int(s.timestamp): s for s in signals}
+        self.total_signals = len(signals)
+        self.blocked_count = getattr(strategy, "blocked_count", 0)
+
+    def generate_signals(self, df_slice: pd.DataFrame) -> List:
+        if df_slice is None or len(df_slice) == 0:
+            return []
+        closed_ts = int(df_slice["timestamp"].iloc[-1])
+        sig = self.by_timestamp.get(closed_ts)
+        return [sig] if sig is not None else []
+
+
 class HistoricalReplayEngine(PaperForwardEngine):
     def required_history_bars(self) -> int:
         req = max(self.config.strategy.ema_period, self.config.strategy.volume_sma_period, self.config.strategy.rsi_period)
@@ -16,6 +48,7 @@ class HistoricalReplayEngine(PaperForwardEngine):
         
         import os
         # Isolate replay paths from live paper state
+        self._redirect_file_logs(os.path.join(self.config.logs_dir, "replay_debug.log"))
         self.state_store = type(self.state_store)(state_file=os.path.join(self.config.logs_dir, "replay_state.json"))
         self.trades_path = os.path.join(self.config.results_dir, "replay", "trades.csv")
         self.events_path = os.path.join(self.config.results_dir, "replay", "events.csv")
@@ -53,10 +86,58 @@ class HistoricalReplayEngine(PaperForwardEngine):
         # Prevent stale feed rejection during replay
         self.feed.is_feed_stale = lambda: False
 
+        # Per-bar equity curve, buffered and written once at the end of the replay.
+        self._equity_rows: List[Dict[str, Any]] = []
+
+    @staticmethod
+    def _redirect_file_logs(path: str):
+        """Point this package's file logging at the run's own logs_dir.
+
+        `paper_engine` binds its file handler at import time, before any config exists, so
+        a replay would otherwise append to the live engine's log outside the configured
+        output folder. Console handlers are left alone.
+        """
+        import logging
+        import os
+
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        logger = logging.getLogger("PaperEngine")
+        for handler in list(logger.handlers):
+            if isinstance(handler, logging.FileHandler):
+                fmt = handler.formatter
+                logger.removeHandler(handler)
+                handler.close()
+                replacement = logging.FileHandler(path)
+                replacement.setFormatter(fmt)
+                logger.addHandler(replacement)
+
+    def _record_equity_bar(self, row_dict: Dict[str, Any], c_close: float):
+        """One equity row per closed candle, mirroring the backtest's per-bar curve.
+
+        Uses the engine's own mark-to-market helper, so the formula is shared with the live
+        snapshot rather than restated here. `peak_equity` is advanced before the drawdown is
+        measured, matching the backtest's ordering.
+        """
+        snapshot = self.equity_snapshot_row(c_close, int(row_dict["timestamp"]), str(row_dict["datetime"]))
+        if snapshot["equity"] > self.peak_equity:
+            self.peak_equity = snapshot["equity"]
+            snapshot = self.equity_snapshot_row(c_close, int(row_dict["timestamp"]), str(row_dict["datetime"]))
+        if snapshot["drawdown_pct"] > self.max_dd_pct:
+            self.max_dd_pct = snapshot["drawdown_pct"]
+        self._equity_rows.append(snapshot)
+
     def run_replay(self) -> pd.DataFrame:
         print("Starting Historical Replay Engine...")
         self.session_trades_count = 0
         self.engine_state = "RUNNING"
+
+        # Signals are produced ONCE over the whole frame by the configured strategy — the
+        # same call the backtest makes — so enabled filters see full history instead of a
+        # rolling slice. Wrapped here, after main.py has had its chance to inject a filtered
+        # strategy onto this engine.
+        self.strategy = WholeFrameSignals(self.strategy, self.df_indicators)
+        if self.strategy.blocked_count:
+            print(f"Signal filters blocked {self.strategy.blocked_count} signals")
 
         # Mute logging to console if we want to run fast
         
@@ -115,9 +196,20 @@ class HistoricalReplayEngine(PaperForwardEngine):
             self.feed.current_price = c_close
             self.evaluate_live_tick(c_close, is_open=False)
             
+            # Step 4b: Record the bar's mark-to-market, as the backtest does every bar.
+            self._record_equity_bar(row_dict, c_close)
+
             # Step 5: Prepare this candle to be evaluated at the NEXT open
             start_idx = max(0, i - req_history)
             prev_df_slice = self.df_indicators.iloc[start_idx:i+1]
             prev_row_dict = row_dict
-            
+
+        self._flush_equity_curve()
         return pd.read_csv(self.trades_path) if self.session_trades_count > 0 else pd.DataFrame()
+
+    def _flush_equity_curve(self):
+        """Write the buffered per-bar equity curve to the replay's own equity_curve.csv."""
+        if not self._equity_rows:
+            return
+        pd.DataFrame(self._equity_rows, columns=self.EQUITY_COLUMNS).to_csv(
+            self.equity_path, mode="a", header=False, index=False)

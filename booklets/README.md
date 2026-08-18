@@ -1,7 +1,13 @@
 # Booklets — project index
 
-Rule-based **ETHUSDT perpetual, 15m, long-only** trading research pipeline.
+Rule-based perpetual-futures trading research pipeline.
 Python is the source of truth; a TradingView Pine port mirrors it for chart validation.
+
+Symbol, timeframe and platform come from the active config — the engines, the Pine
+exporter, the robustness suite and the optimizer all read them rather than assuming a
+market. The frozen reference candidate happens to be **ETHUSDT perpetual, 15m, long-only**,
+and every historical result in this project was produced on it, but that is the reference,
+not a limitation of the app.
 
 ## What each file is for
 
@@ -91,17 +97,24 @@ stages. The run plan prints the five budgets before anything runs.
 `execution.tick_size` is `"auto"` by default and is resolved once from Binance
 Futures `PRICE_FILTER.tickSize` for the symbol; the quantity step comes from
 `LOT_SIZE.stepSize`. Both resolved values are recorded in the manifest and the
-emitted config. Tick size is never derived from the timeframe and there is no
-per-symbol map.
+emitted config, **and are applied to every trial** — a campaign is not limited to the
+symbols listed in `optimization/v3/spec.py`. Tick size is never derived from the
+timeframe and there is no per-symbol map.
 
 `history` (preset `_schema_version: 3`) requires an explicit `mode`: `auto`, `days`, `date_range`, or `candles`.
-Only fields required by the chosen mode may be non-null. `auto` targets ~43,000 candles from timeframe
-(e.g., 1m -> 30d, 15m -> 450d). Custom short history runs emit an experimental note without stopping execution.
+Only fields required by the chosen mode may be non-null. `auto` targets 43,200 evaluable candles plus
+1,000 warmup (e.g., 1m -> ~30d, 15m -> ~450d). For `auto` and `candles`, data preparation checks the local
+cache for both **depth** and **recency** and fetches or extends it when either fails, so
+"availability-limited" means the exchange genuinely has no more history — not a stale cache.
+Custom short history runs emit an experimental note without stopping execution.
 
 UNSEEN is carved off the end of the window, locked, and physically removed from the
 frame the optimizer receives, so no search, narrowing, seed, risk or Bollinger stage
 can address it. It is opened once, after the winner is frozen, and its metrics are
-recorded as confirmation only — they never change the selection.
+recorded as confirmation only — they never change the selection. The reservation
+defaults to 20% (effective split TRAIN 56% / VALID 24% / UNSEEN 20%); the optional
+`partition` block sets a different `unseen_pct` or pins `unseen_start` to an exact date
+for reproducing a historical campaign.
 
 The output name is mandatory, is never auto-generated, and an existing config is
 never overwritten — the check runs before any data is loaded. `--optimize` cannot be

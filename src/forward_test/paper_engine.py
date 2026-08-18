@@ -30,7 +30,7 @@ from risk_management.baseline import BaselineRiskManager
 from forward_test.state import ForwardStateStore
 from forward_test.dashboard import PaperDashboard
 from forward_test.feed import LiveMarketFeed
-from common.utils import setup_logger, resolution_to_seconds
+from common.utils import setup_logger, resolution_to_seconds, base_asset
 
 logger = setup_logger("PaperEngine", log_file="logs/readiness_debug.log")
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -307,34 +307,43 @@ class PaperForwardEngine:
         self.state_store.save_state_atomic(state_data)
         self.last_state_save_time = now_ist.strftime("%H:%M:%S IST")
 
+    def equity_snapshot_row(self, current_price: float, ts: int, dt_str: str) -> Dict[str, Any]:
+        """One equity-curve row for `current_price`, in EQUITY_COLUMNS order.
+
+        Single source of the mark-to-market formula for this engine: unrealized =
+        gross - (entry fee + estimated exit fee), equity = balance + unrealized, and
+        drawdown measured against `self.peak_equity`. Both the live 10-minute snapshot
+        and the historical replay's per-bar curve call this, so the two can never drift.
+        """
+        unrealized = 0.0
+        if self.active_position:
+            pos = self.active_position
+            c_p = current_price or pos["entry_price"]
+            g_pnl = (c_p - pos["entry_price"]) * pos["size"] if pos["side"] == "LONG" else (pos["entry_price"] - c_p) * pos["size"]
+            est_fee = pos["entry_fee"] + (c_p * pos["size"] * self.config.execution.taker_fee_pct)
+            unrealized = g_pnl - est_fee
+
+        equity = self.account.balance + unrealized
+        dd = ((self.peak_equity - equity) / self.peak_equity * 100.0) if self.peak_equity > 0 else 0.0
+
+        return {
+            "timestamp": int(ts),
+            "datetime": dt_str,
+            "balance": round(self.account.balance, 2),
+            "equity": round(equity, 2),
+            "open_pnl": round(unrealized, 2),
+            "drawdown_pct": round(dd, 2),
+            "in_position": self.active_position is not None,
+            "current_price": round(current_price, 2)
+        }
+
     def save_periodic_equity_snapshot(self, current_price: float):
         """Save a light 10-minute equity snapshot to results/forward/equity_curve.csv."""
         now_ts = time.time()
         if now_ts - self.last_equity_snapshot_ts >= (self.config.equity_snapshot_interval_mins * 60):
             self.last_equity_snapshot_ts = now_ts
             dt_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S+00:00")
-
-            unrealized = 0.0
-            if self.active_position:
-                pos = self.active_position
-                c_p = current_price or pos["entry_price"]
-                g_pnl = (c_p - pos["entry_price"]) * pos["size"] if pos["side"] == "LONG" else (pos["entry_price"] - c_p) * pos["size"]
-                est_fee = pos["entry_fee"] + (c_p * pos["size"] * self.config.execution.taker_fee_pct)
-                unrealized = g_pnl - est_fee
-
-            equity = self.account.balance + unrealized
-            dd = ((self.peak_equity - equity) / self.peak_equity * 100.0) if self.peak_equity > 0 else 0.0
-
-            snapshot = {
-                "timestamp": int(now_ts),
-                "datetime": dt_str,
-                "balance": round(self.account.balance, 2),
-                "equity": round(equity, 2),
-                "open_pnl": round(unrealized, 2),
-                "drawdown_pct": round(dd, 2),
-                "in_position": self.active_position is not None,
-                "current_price": round(current_price, 2)
-            }
+            snapshot = self.equity_snapshot_row(current_price, int(now_ts), dt_str)
             df_row = pd.DataFrame([snapshot], columns=self.EQUITY_COLUMNS)
             df_row.to_csv(self.equity_path, mode="a", header=False, index=False)
 
@@ -609,7 +618,7 @@ class PaperForwardEngine:
                     "swing_low": sig.swing_low
                 }
                 self.last_executed_signal_ts = sig_ts
-                self.log_event("PAPER_ENTRY", f"Opened Paper {sig.signal_type} @ ${realized_entry:.2f} (Size: {sizing.position_size:.4f} ETH | SL: ${sizing.sl_price:.2f} | TP: ${sizing.tp_price:.2f})")
+                self.log_event("PAPER_ENTRY", f"Opened Paper {sig.signal_type} @ ${realized_entry:.2f} (Size: {sizing.position_size:.4f} {base_asset(self.config.platform.symbol)} | SL: ${sizing.sl_price:.2f} | TP: ${sizing.tp_price:.2f})")
                 self.save_state(realized_entry)
             else:
                 logger.warning(f"Sizing rejected! Valid={sizing.is_valid}, Size={sizing.position_size}, Reason={sizing.reason}")
@@ -627,8 +636,8 @@ class PaperForwardEngine:
             "run_id": "FORWARD_PAPER_SESSION",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "stage": "FORWARD_PAPER",
-            "symbol": "ETHUSDT",
-            "platform": "BINANCE_FUTURES",
+            "symbol": self.config.platform.symbol,
+            "platform": self.config.platform.platform,
             "timeframe": self.config.platform.resolution,
             "start_date": "LIVE",
             "end_date": "LIVE",

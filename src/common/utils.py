@@ -10,6 +10,18 @@ from datetime import datetime, timezone
 
 
 
+_QUOTE_ASSETS = ("USDT", "USDC", "BUSD", "USD", "PERP")
+
+
+def base_asset(symbol: str) -> str:
+    """Base asset of a trading symbol, for display only (ETHUSDT -> ETH)."""
+    up = (symbol or "").strip().upper()
+    for quote in _QUOTE_ASSETS:
+        if up.endswith(quote) and len(up) > len(quote):
+            return up[: -len(quote)]
+    return up or "UNITS"
+
+
 def setup_logger(name: str = "ETH_Pipeline", log_file: Optional[str] = None, level: int = logging.INFO) -> logging.Logger:
     """Set up and configure a logger instance."""
     logger = logging.getLogger(name)

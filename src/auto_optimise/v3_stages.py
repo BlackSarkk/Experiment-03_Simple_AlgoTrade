@@ -131,6 +131,39 @@ class _DirectionOverride:
         return False
 
 
+class _MarketRulesOverride:
+    """Apply the exchange-resolved tick size and quantity step for one campaign.
+
+    V3 carries a small per-symbol `TICK_SIZE` map and a constant `QUANTITY_STEP`;
+    `build_cfg` reads both and raises KeyError for any symbol that is not in the
+    map. The campaign already resolves these from the exchange, so they are pushed
+    into the spec here — same idiom as the direction and budget overrides, and V3's
+    source is still never edited. Restored on exit even if a stage raises. Without
+    this, every trial would be scored on a different tick/step than the one written
+    into the emitted config.
+    """
+
+    def __init__(self, symbol, rules):
+        self.symbol = symbol
+        self.rules = rules
+        self._saved = {}
+
+    def __enter__(self):
+        if self.rules is None:
+            return self
+        self._saved = {"TICK_SIZE": dict(V3_SPEC.TICK_SIZE),
+                       "QUANTITY_STEP": V3_SPEC.QUANTITY_STEP}
+        V3_SPEC.TICK_SIZE = dict(V3_SPEC.TICK_SIZE)
+        V3_SPEC.TICK_SIZE[self.symbol] = float(self.rules.tick_size)
+        V3_SPEC.QUANTITY_STEP = float(self.rules.quantity_step)
+        return self
+
+    def __exit__(self, *exc):
+        for attr, value in self._saved.items():
+            setattr(V3_SPEC, attr, value)
+        return False
+
+
 class _BudgetOverride:
     """Apply per-stage budgets to V3's spec for the duration of one campaign.
 
@@ -264,7 +297,7 @@ TAG_TO_KEY = {"1a_broad": "stage_1a_broad", "1b_narrow": "stage_1b_narrow",
 
 def run(preset, prepared, allocation: Dict[str, int], progress=None,
         dashboard=None, show_dashboard: bool = True,
-        time_fn=None, stream=None) -> V3Result:
+        time_fn=None, stream=None, rules=None) -> V3Result:
     """Execute stages 1a → 2b. Raises StageFailure if a required stage yields nothing."""
 
     def say(msg):
@@ -295,7 +328,8 @@ def run(preset, prepared, allocation: Dict[str, int], progress=None,
             ("LONG+SHORT" if preset.direction.long_enabled and preset.direction.short_enabled
              else "LONG" if preset.direction.long_enabled else "SHORT"), **kw)
 
-    with _BudgetOverride(enabled), _DirectionOverride(preset.direction), dashboard:
+    with _BudgetOverride(enabled), _DirectionOverride(preset.direction), \
+            _MarketRulesOverride(preset.symbol, rules), dashboard:
         assert V3_SPEC.LONG_ENABLED == preset.direction.long_enabled
         assert V3_SPEC.SHORT_ENABLED == preset.direction.short_enabled
         campaign = _ObservedCampaign(preset.symbol, preset.timeframe, dev, warm)

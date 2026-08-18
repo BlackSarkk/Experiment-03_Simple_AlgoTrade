@@ -1,8 +1,8 @@
 //@version=5
-strategy("ETHUSDT.P 15m — Candidate 158 OP-BB (Bollinger ON)", shorttitle="ETHUSDT.P 15m C158-BB", overlay=true, initial_capital=10000, default_qty_type=strategy.cash, commission_type=strategy.commission.percent, commission_value=0.05, slippage=1, process_orders_on_close=false, pyramiding=0, margin_long=0, margin_short=0)
+strategy("ETHUSDT.P 15m — config2-ETHUSDTP15m-long", shorttitle="config2-ETHUSDTP15m-", overlay=true, initial_capital=10000, default_qty_type=strategy.cash, commission_type=strategy.commission.percent, commission_value=0.05, slippage=1, process_orders_on_close=false, pyramiding=0, margin_long=0, margin_short=0)
 
 // =============================================================================
-// ETHUSDT.P 15m — Candidate 158 OP-BB (Bollinger ON) — generated from configs/config2-ETHUSDTP15m-long.json
+// ETHUSDT.P 15m — config2-ETHUSDTP15m-long — generated from configs/config/config2-ETHUSDTP15m-long.json
 // =============================================================================
 // Source        : config1 (frozen Candidate #158) with the Stage-1 Bollinger filter switched on
 // Development   : 2024-07-16 -> 2026-07-15
@@ -83,15 +83,6 @@ bb_exp_ratio= input.float(0.95, "Expansion Min Ratio (0 = off)", minval=0.0, ste
 bb_mid_dist = input.float(0.15, "Min Middle-Band Distance (0 = off)", minval=0.0, step=0.01, group=grp_bb)
 
 // =============================================================================
-// 6. ADX FILTER  (not part of the Python strategy — inert unless enabled)
-// =============================================================================
-grp_adx = "6. ADX Filter (not in Python strategy)"
-adx_enabled   = input.bool(false, "Enable ADX Filter", group=grp_adx)
-adx_len       = input.int(12, "ADX Length", minval=1, group=grp_adx)
-adx_threshold = input.float(15.0, "ADX Threshold", minval=1.0, step=1.0, group=grp_adx)
-adx_rising    = input.bool(false, "Require Rising ADX", group=grp_adx)
-
-// =============================================================================
 // INDICATOR CALCULATIONS
 // =============================================================================
 ema_v   = ta.ema(close, ema_len)
@@ -117,10 +108,6 @@ bb_block_exp = bb_exp_ratio > 0.0 and not na(bb_ratio) and bb_ratio < bb_exp_rat
 bb_block_mid = bb_mid_dist  > 0.0 and not na(bb_middist_v) and bb_middist_v < bb_mid_dist
 bb_ok = not bb_enabled or not (bb_block_bw or bb_block_exp or bb_block_mid)
 
-// --- ADX (inert by default) ---
-[_dip, _dim, adx_val] = ta.dmi(adx_len, adx_len)
-adx_ok = not adx_enabled or (adx_val >= adx_threshold and (not adx_rising or adx_val > adx_val[1]))
-
 // =============================================================================
 // CONSOLIDATION / SWING / RSI CONTEXT / VOLUME
 // =============================================================================
@@ -145,8 +132,8 @@ rsi_long_valid  = (rsi_v < rsi_ob) and (rsi_v >= 40.0 or rsi_was_oversold)
 rsi_short_valid = (rsi_v > rsi_os) and (rsi_v <= 60.0 or rsi_was_overbought)
 cons_valid = prior_consolidation or is_consolidating
 
-long_signal  = enable_long  and ema_cross_up   and rsi_long_valid  and cons_valid and vol_confirmed and bb_ok and adx_ok
-short_signal = enable_short and ema_cross_down and rsi_short_valid and cons_valid and vol_confirmed and bb_ok and adx_ok
+long_signal  = enable_long  and ema_cross_up   and rsi_long_valid  and cons_valid and vol_confirmed and bb_ok
+short_signal = enable_short and ema_cross_down and rsi_short_valid and cons_valid and vol_confirmed and bb_ok
 
 // =============================================================================
 // POSITION SIZING — mirrors BaselineRiskManager.calculate_position()
@@ -256,7 +243,7 @@ if show_hud and barstate.islast
     pnl_color = net_pnl >= 0 ? #10b981 : #ef4444
     pos_str = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size, "#.###") + " ETH)" : strategy.position_size < 0 ? "SHORT (" + str.tostring(math.abs(strategy.position_size), "#.###") + " ETH)" : "FLAT"
     table.cell(hud, 0, 0, "Config", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
-    table.cell(hud, 1, 0, "ETHUSDT.P 15m C158-BB", text_color=#38bdf8, text_size=size.small, text_halign=text.align_right)
+    table.cell(hud, 1, 0, "config2-ETHUSDTP15m-", text_color=#38bdf8, text_size=size.small, text_halign=text.align_right)
     table.cell(hud, 0, 1, "Net Profit ($)", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
     table.cell(hud, 1, 1, "$" + str.tostring(net_pnl, "#,###.00"), text_color=pnl_color, text_size=size.small, text_halign=text.align_right)
     table.cell(hud, 0, 2, "Win Rate (%)", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left)
